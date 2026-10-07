@@ -597,7 +597,7 @@ func (m RunWatchFlowModel) workflowRow(wf RunWatchWorkflow) string {
 	return fmt.Sprintf("  %s  %s %s  %s",
 		pad(wf.Name, runWatchWorkflowNameCol),
 		colorizeStatusIcon(wf.Symbol, m.opts.Color),
-		pad(wf.Status, runWatchStatusCol),
+		colorizeStatusWord(wf.Symbol, wf.Status, m.opts.Color),
 		wf.Duration)
 }
 
@@ -607,8 +607,26 @@ func (m RunWatchFlowModel) jobRow(j RunWatchJob) string {
 	return fmt.Sprintf("    %s  %s %s  %s",
 		pad(j.Name, runWatchJobNameCol),
 		colorizeStatusIcon(j.Symbol, m.opts.Color),
-		pad(j.Status, runWatchStatusCol),
+		colorizeStatusWord(j.Symbol, j.Status, m.opts.Color),
 		j.Type)
+}
+
+// colorizeStatusWord renders a status word in the same theme color as its glyph,
+// so the two read as one unit — the watch table's answer to the inverse-video
+// badge the older watcher drew, without the block of background that made a
+// finished row shout as loudly as a running one. The word is padded before it is
+// colored, so it occupies exactly the same cells with or without color and the
+// columns stay aligned. As with colorizeStatusIcon, an unknown symbol — and every
+// symbol when color is off — leaves the word plain.
+func colorizeStatusWord(symbol, word string, color bool) string {
+	padded := pad(word, runWatchStatusCol)
+	if !color {
+		return padded
+	}
+	if style, ok := statusIconStyle(symbol); ok {
+		return style.Render(padded)
+	}
+	return padded
 }
 
 // line trims a row's trailing padding, fits it to the terminal width, and

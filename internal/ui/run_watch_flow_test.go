@@ -318,6 +318,25 @@ func TestRunWatchFlow_ColorsStatusGlyphs(t *testing.T) {
 		}
 	})
 
+	t.Run("the status word wears its glyph's color too", func(t *testing.T) {
+		// The word carries the same color as the glyph so the pair reads as one
+		// status unit; the colored run is asserted on the word immediately after
+		// the SGR sequence so a stray color elsewhere cannot satisfy it.
+		tm := startWatch(t, ui.RunWatchFlowOptions{Branch: "main", Color: true, Fetch: fetch})
+		waitForOutput(t, tm, "build")
+		raw := flowFrame(t, tm)
+
+		for _, tc := range []struct{ word, code, name string }{
+			{"succeeded", "42", "green"},
+			{"failed", "196", "red"},
+			{"errored", "220", "yellow"},
+			{"running", "39", "blue"},
+		} {
+			assert.Check(t, cmp.Contains(raw, "38;5;"+tc.code+"m"+tc.word),
+				"%q should render %s (256-color %s)", tc.word, tc.name, tc.code)
+		}
+	})
+
 	t.Run("without color", func(t *testing.T) {
 		tm := startWatch(t, ui.RunWatchFlowOptions{Branch: "main", Fetch: fetch})
 		waitForOutput(t, tm, "build")
