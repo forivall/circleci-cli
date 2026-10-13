@@ -282,12 +282,13 @@ func watchInteractive(ctx context.Context, client *apiclient.Client, runID uuid.
 		return err
 	}
 	model := ui.NewRunWatchFlow(ctx, ui.RunWatchFlowOptions{
-		RunID:    runID,
-		Branch:   branch,
-		Color:    iostream.ColorEnabled(ctx),
-		Animate:  iostream.SpinnerEnabled(ctx),
-		FailFast: failFast,
-		Timeout:  timeout,
+		RunID:       runID,
+		Branch:      branch,
+		Color:       iostream.ColorEnabled(ctx),
+		Animate:     iostream.SpinnerEnabled(ctx),
+		ClockLayout: iostream.ClockLayout(),
+		FailFast:    failFast,
+		Timeout:     timeout,
 		Fetch: func(ctx context.Context) (ui.RunWatchState, error) {
 			state, err := fetchWatchState(ctx, client, runID)
 			if err != nil {

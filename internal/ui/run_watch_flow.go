@@ -194,6 +194,12 @@ type RunWatchFlowOptions struct {
 	Color   bool
 	Animate bool
 
+	// ClockLayout is the Go time layout the timing column renders a row's
+	// timestamps with — the caller passes the user's locale-aware layout (see
+	// iostream.ClockLayout), this package having no business reading the
+	// environment itself. Empty means the plain 24-hour default.
+	ClockLayout string
+
 	// FailFast ends the watch as soon as any job has failed, without waiting for
 	// the rest of the run.
 	FailFast bool
@@ -657,11 +663,23 @@ func (m RunWatchFlowModel) timing(start *time.Time, end *time.Time) string {
 	if end != nil {
 		d = end.Sub(*start)
 	}
-	clock := start.Local().Format(runWatchClockLayout)
+	layout := m.clockLayout()
+	clock := start.Local().Format(layout)
 	if end != nil {
-		clock += " → " + end.Local().Format(runWatchClockLayout)
+		clock += " → " + end.Local().Format(layout)
 	}
 	return m.muted(FormatElapsed(d) + "  @ " + clock)
+}
+
+// clockLayout is the layout the timing column renders timestamps with: the
+// caller's locale-aware layout when it supplied one, else the plain 24-hour
+// default. Both hours are rendered with it, so a row's window reads the same on
+// either side of the arrow.
+func (m RunWatchFlowModel) clockLayout() string {
+	if m.opts.ClockLayout != "" {
+		return m.opts.ClockLayout
+	}
+	return runWatchClockLayout
 }
 
 // colorizeStatusWord renders a status word in the same theme color as its glyph,

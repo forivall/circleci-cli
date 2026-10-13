@@ -164,6 +164,10 @@ var helpTopics = []helpTopic{
 			When unset, a built-in scrollable viewer is used. Set it to %[1]scat%[1]s or an empty value to disable
 			paging entirely.
 
+			%[1]sLC_ALL%[1]s, %[1]sLC_TIME%[1]s, %[1]sLANG%[1]s: determine the locale, which selects between a 12-hour and a
+			24-hour clock where %[1]scircleci%[1]s prints a time of day (for example the %[1]scircleci run watch%[1]s table).
+			The usual POSIX precedence applies: %[1]sLC_ALL%[1]s overrides %[1]sLC_TIME%[1]s, which overrides %[1]sLANG%[1]s.
+
 			%[1]sCIRCLE_NO_TELEMETRY%[1]s: set to any value to disable telemetry.
 
 			%[1]sNO_ANALYTICS%[1]s: set to any value to disable telemetry.

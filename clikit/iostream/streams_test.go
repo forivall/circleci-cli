@@ -88,6 +88,75 @@ func TestInteractiveEnvDisabled(t *testing.T) {
 	}
 }
 
+// clearLocaleEnv unsets every locale variable so a test starts from "no locale
+// named", where the 24-hour default applies.
+func clearLocaleEnv(t *testing.T) {
+	t.Helper()
+	for _, k := range []string{"LC_ALL", "LC_TIME", "LANG"} {
+		t.Setenv(k, "")
+	}
+}
+
+// TestClockLayout pins which locales get a 12-hour clock. The region is what
+// decides; the language only matters for the one locale whose cycle differs from
+// its region's (fr-CA). The default when nothing is named is 24-hour.
+func TestClockLayout(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{name: "no locale named", env: nil, want: clockLayout24},
+		{name: "C means no locale", env: map[string]string{"LANG": "C"}, want: clockLayout24},
+		{name: "US English is 12-hour", env: map[string]string{"LANG": "en_US.UTF-8"}, want: clockLayout12},
+		// A bare language names no region, so the default applies even where the
+		// language's home region is 12-hour.
+		{name: "bare language has no region", env: map[string]string{"LANG": "en"}, want: clockLayout24},
+		{name: "India is 12-hour", env: map[string]string{"LANG": "en_IN"}, want: clockLayout12},
+		{name: "UK is 24-hour", env: map[string]string{"LANG": "en_GB.UTF-8"}, want: clockLayout24},
+		{name: "Canada is 12-hour", env: map[string]string{"LANG": "en_CA.UTF-8"}, want: clockLayout12},
+		// The one language-and-region override: Canada is 12-hour, Québec is not.
+		{name: "Quebec is 24-hour", env: map[string]string{"LANG": "fr_CA.UTF-8"}, want: clockLayout24},
+		{name: "Japan is 24-hour", env: map[string]string{"LANG": "ja_JP.UTF-8"}, want: clockLayout24},
+		{name: "hyphen separator works", env: map[string]string{"LANG": "en-CA"}, want: clockLayout12},
+		// LC_ALL wins over LC_TIME, which wins over LANG — the POSIX precedence.
+		{name: "LC_TIME beats LANG", env: map[string]string{"LANG": "en_US", "LC_TIME": "en_GB"}, want: clockLayout24},
+		{name: "LC_ALL beats LC_TIME", env: map[string]string{"LC_ALL": "en_CA", "LC_TIME": "en_GB"}, want: clockLayout12},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clearLocaleEnv(t)
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			assert.Check(t, cmp.Equal(ClockLayout(), tc.want))
+		})
+	}
+}
+
+// TestSplitLocale pins how a POSIX locale string is parsed: the codeset and
+// modifier suffixes dropped, the underscore accepted, the language lowercased
+// and the region uppercased.
+func TestSplitLocale(t *testing.T) {
+	tests := []struct {
+		locale, lang, region string
+	}{
+		{"en_US.UTF-8", "en", "US"},
+		{"fr_CA@euro", "fr", "CA"},
+		{"en-CA", "en", "CA"},
+		{"en", "en", ""},
+		{"C", "c", ""},
+		{"", "", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.locale, func(t *testing.T) {
+			lang, region := splitLocale(tc.locale)
+			assert.Check(t, cmp.Equal(lang, tc.lang))
+			assert.Check(t, cmp.Equal(region, tc.region))
+		})
+	}
+}
+
 func TestBackgroundQueryableNonTerminal(t *testing.T) {
 	clearTerminalEnv(t)
 

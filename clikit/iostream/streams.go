@@ -107,6 +107,114 @@ func isCircleCI() bool {
 	return os.Getenv("CIRCLECI") != ""
 }
 
+// Clock layouts for a wall-clock time with seconds, one per hour cycle the
+// locale environment selects between. The 12-hour form puts a space before the
+// suffix, as CLDR's own "h:mm:ss a" pattern does.
+const (
+	clockLayout24 = "15:04:05"
+	clockLayout12 = "3:04:05 PM"
+)
+
+// ClockLayout returns the Go time layout for a wall-clock time in the user's
+// locale: a 12-hour clock with an AM/PM suffix where the locale uses one, and a
+// 24-hour clock everywhere else. Callers hand the result to whatever renders a
+// clock, so a user who reads times as "3:04:05 PM" at their shell prompt sees
+// the same figure in the CLI's own views.
+//
+// It follows the POSIX locale environment — LC_ALL, then LC_TIME, then LANG,
+// the precedence the C library itself applies — and honours the cross-tool
+// convention that C and POSIX mean "no locale". It takes no context, because
+// like EnvAllowsInteractive the answer comes entirely from the environment and
+// not at all from the streams.
+//
+// Only the hour cycle is localized. The seconds field and the separators stay
+// put: the view this serves is a monospaced column, and a locale's date and
+// decimal conventions are not what that column is for.
+func ClockLayout() string {
+	if localeHour12(localeSetting()) {
+		return clockLayout12
+	}
+	return clockLayout24
+}
+
+// localeSetting returns the locale the process should render in, or "" when the
+// environment names none. LC_ALL overrides every category, LC_TIME the time
+// formats specifically, and LANG is the fallback for both — the precedence
+// POSIX gives them.
+func localeSetting() string {
+	for _, key := range []string{"LC_ALL", "LC_TIME", "LANG"} {
+		if v := os.Getenv(key); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// localeHour12 reports whether locale formats times on a 12-hour clock. The
+// region decides, per CLDR's supplemental time data — the United States,
+// Canada, Australia, India and most of Latin America and the Middle East are
+// 12-hour, while Europe (the UK and Ireland included) and most of the rest of
+// the world are 24-hour.
+//
+// A language-and-region entry beats the bare region, which is CLDR's own lookup
+// order and the reason fr-CA is called out below: Canada as a whole is 12-hour,
+// but Québec writes times on the 24-hour clock. Script subtags and the "001"
+// world region are ignored — neither changes the answer for a locale anyone
+// would set in LANG — so a three-part locale such as sr-Latn-RS falls back to
+// the 24-hour default rather than to its territory.
+func localeHour12(locale string) bool {
+	lang, region := splitLocale(locale)
+	if override, ok := hour12Overrides[lang+"-"+region]; ok {
+		return override
+	}
+	return hour12Regions[region]
+}
+
+// hour12Overrides are the language-and-region locales whose hour cycle differs
+// from their region's: Canada is 12-hour, but fr-CA is not.
+var hour12Overrides = map[string]bool{
+	"fr-CA": false,
+}
+
+// hour12Regions are the territories CLDR records as preferring a 12-hour clock
+// (supplemental timeData, "_preferred": "h"). Every other region, and a locale
+// naming no region at all, is 24-hour.
+var hour12Regions = map[string]bool{
+	"419": true, // Latin America
+	"AE":  true, "AG": true, "AL": true, "AR": true, "AS": true, "AU": true,
+	"BB": true, "BD": true, "BH": true, "BM": true, "BN": true, "BO": true,
+	"BS": true, "BT": true, "CA": true, "CL": true, "CO": true, "CR": true,
+	"CU": true, "CY": true, "DJ": true, "DM": true, "DO": true, "DZ": true,
+	"EC": true, "EG": true, "EH": true, "ER": true, "ET": true, "FJ": true,
+	"FM": true, "GD": true, "GH": true, "GM": true, "GR": true, "GT": true,
+	"GU": true, "GY": true, "HK": true, "HN": true, "IN": true, "IQ": true,
+	"JM": true, "JO": true, "KH": true, "KI": true, "KN": true, "KP": true,
+	"KR": true, "KW": true, "KY": true, "LB": true, "LC": true, "LR": true,
+	"LS": true, "LY": true, "MH": true, "MO": true, "MP": true, "MR": true,
+	"MW": true, "MX": true, "MY": true, "NA": true, "NI": true, "NZ": true,
+	"OM": true, "PA": true, "PE": true, "PG": true, "PH": true, "PK": true,
+	"PR": true, "PS": true, "PW": true, "PY": true, "QA": true, "SA": true,
+	"SB": true, "SD": true, "SG": true, "SL": true, "SO": true, "SS": true,
+	"SV": true, "SY": true, "SZ": true, "TC": true, "TD": true, "TN": true,
+	"TO": true, "TT": true, "TW": true, "UM": true, "US": true, "UY": true,
+	"VC": true, "VE": true, "VG": true, "VI": true, "VU": true, "WS": true,
+	"YE": true, "ZM": true,
+}
+
+// splitLocale reduces a POSIX locale to its lowercased language and uppercased
+// region: "en_CA.UTF-8" and "fr-CA@euro" become ("en", "CA") and ("fr", "CA").
+// A locale naming no region — "en", "C", "POSIX", "" — yields an empty region,
+// which selects the 24-hour default.
+func splitLocale(locale string) (lang, region string) {
+	locale = strings.TrimSpace(locale)
+	// Drop the codeset and modifier suffixes: en_US.UTF-8, fr_FR@euro.
+	if i := strings.IndexAny(locale, ".@"); i >= 0 {
+		locale = locale[:i]
+	}
+	lang, region, _ = strings.Cut(strings.ReplaceAll(locale, "_", "-"), "-")
+	return strings.ToLower(lang), strings.ToUpper(region)
+}
+
 // pagerProgram interprets the PAGER environment variable.
 //
 //   - set is false when PAGER is unset, meaning the caller should use the
