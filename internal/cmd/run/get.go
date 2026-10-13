@@ -202,6 +202,10 @@ type workflowOutput struct {
 	CurrentOutcome string      `json:"current_outcome,omitempty"`
 	Duration       string      `json:"duration,omitempty"`
 	Jobs           []jobOutput `json:"jobs"`
+
+	// Raw timings behind Duration, for the watch table.
+	createdAt time.Time
+	endedAt   *time.Time
 }
 
 type jobOutput struct {
@@ -211,6 +215,9 @@ type jobOutput struct {
 	Outcome        string    `json:"outcome,omitempty"`
 	CurrentOutcome string    `json:"current_outcome,omitempty"`
 	Type           string    `json:"type,omitempty"`
+
+	startedAt *time.Time
+	endedAt   *time.Time
 }
 
 func runGet(ctx context.Context, client *apiclient.Client, args []string, projectSlug, branch string, jsonOut, mine, noInteractive, failureReport bool) error {
@@ -906,6 +913,8 @@ func buildOutput(r *apiclient.RunV3, workflows []apiclient.WorkflowV3, wfJobs []
 				Outcome:        j.Outcome,
 				CurrentOutcome: j.CurrentOutcome,
 				Type:           j.Type,
+				startedAt:      j.StartedAt,
+				endedAt:        j.EndedAt,
 			})
 		}
 		var dur string
@@ -920,6 +929,8 @@ func buildOutput(r *apiclient.RunV3, workflows []apiclient.WorkflowV3, wfJobs []
 			CurrentOutcome: w.CurrentOutcome,
 			Duration:       dur,
 			Jobs:           jobs,
+			createdAt:      w.CreatedAt,
+			endedAt:        w.EndedAt,
 		}
 	}
 

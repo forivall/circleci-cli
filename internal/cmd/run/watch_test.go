@@ -24,6 +24,7 @@ package run
 
 import (
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"gotest.tools/v3/assert"
@@ -101,21 +102,25 @@ func TestWatchState(t *testing.T) {
 	jobID := uuid.MustParse("d0000000-0000-4000-8000-00000000f001")
 
 	t.Run("maps phases to glyphs and words", func(t *testing.T) {
+		created := time.Date(2026, 1, 2, 15, 4, 5, 0, time.UTC)
+		ended := created.Add(62 * time.Second)
 		state := watchState(runGetOutput{Workflows: []workflowOutput{{
 			Name: "build", Phase: "ended", Outcome: "succeeded", Duration: "1m2s",
+			createdAt: created, endedAt: &ended,
 			Jobs: []jobOutput{{ID: jobID, Name: "test", Phase: "started", Type: "build"}},
-		}}})
+		}}}, "")
 
 		assert.Assert(t, is.Len(state.Workflows, 1))
 		wf := state.Workflows[0]
 		assert.Check(t, is.Equal(wf.Symbol, "✓"))
 		assert.Check(t, is.Equal(wf.Status, "succeeded"))
-		assert.Check(t, is.Equal(wf.Duration, "1m2s"))
+		assert.Check(t, is.Equal(wf.CreatedAt, created))
+		assert.Assert(t, wf.EndedAt != nil)
+		assert.Check(t, is.Equal(*wf.EndedAt, ended))
 
 		assert.Assert(t, is.Len(wf.Jobs, 1))
 		assert.Check(t, is.Equal(wf.Jobs[0].Symbol, "●"))
 		assert.Check(t, is.Equal(wf.Jobs[0].Status, "running"))
-		assert.Check(t, is.Equal(wf.Jobs[0].Type, "build"))
 		assert.Check(t, !wf.Jobs[0].Failed)
 	})
 
@@ -123,7 +128,7 @@ func TestWatchState(t *testing.T) {
 		state := watchState(runGetOutput{Phase: "ended", CurrentOutcome: "failed", Workflows: []workflowOutput{{
 			Name: "build", Phase: "ended", Outcome: "failed",
 			Jobs: []jobOutput{{ID: jobID, Name: "test", Phase: "ended", Outcome: "failed"}},
-		}}})
+		}}}, "")
 
 		assert.Check(t, state.Done)
 		assert.Check(t, is.Equal(state.Outcome, "failed"))
@@ -134,7 +139,7 @@ func TestWatchState(t *testing.T) {
 		state := watchState(runGetOutput{Phase: "started", Workflows: []workflowOutput{
 			{Name: "build", Phase: "ended", Outcome: "succeeded"},
 			{Name: "deploy", Phase: "started"},
-		}})
+		}}, "")
 
 		assert.Check(t, !state.Done)
 		assert.Check(t, !state.AllWorkflowsEnded)
@@ -146,7 +151,7 @@ func TestWatchState(t *testing.T) {
 		// success as the whole run's.
 		state := watchState(runGetOutput{Phase: "started", Workflows: []workflowOutput{
 			{Name: "setup", Phase: "ended", Outcome: "succeeded"},
-		}})
+		}}, "")
 
 		assert.Check(t, !state.Done)
 		assert.Check(t, state.AllWorkflowsEnded)
@@ -155,7 +160,7 @@ func TestWatchState(t *testing.T) {
 	t.Run("is done once the run has ended, with no workflows at all", func(t *testing.T) {
 		// A run whose config was rejected outright never produces a workflow, so a
 		// watch waiting on its workflows would wait until the timeout.
-		state := watchState(runGetOutput{Phase: "ended", CurrentOutcome: "errored"})
+		state := watchState(runGetOutput{Phase: "ended", CurrentOutcome: "errored"}, "")
 
 		assert.Check(t, state.Done)
 		assert.Check(t, !state.AllWorkflowsEnded)
@@ -178,7 +183,7 @@ func TestWatchStateRunErrors(t *testing.T) {
 	}
 
 	t.Run("the run's errors are carried into the watch state", func(t *testing.T) {
-		state := watchState(rejected)
+		state := watchState(rejected, "")
 
 		assert.Assert(t, is.Len(state.Errors, 1))
 		assert.Check(t, is.Equal(state.Errors[0].Type, "config"))
@@ -186,19 +191,19 @@ func TestWatchStateRunErrors(t *testing.T) {
 	})
 
 	t.Run("a run carrying errors did not succeed", func(t *testing.T) {
-		assert.Check(t, is.Equal(watchState(rejected).Outcome, "failed"))
+		assert.Check(t, is.Equal(watchState(rejected, "").Outcome, "failed"))
 	})
 
 	t.Run("the error is the message, since no job failed", func(t *testing.T) {
 		runID := uuid.MustParse("f0000000-0000-4000-8000-00000000f001")
-		msg := runFailureMessage(runID, watchState(rejected))
+		msg := runFailureMessage(runID, watchState(rejected, ""))
 
 		assert.Check(t, is.Contains(msg, "Run "+runID.String()+" failed."))
 		assert.Check(t, is.Contains(msg, "config error: Error calling workflow: 'deploy'"))
 	})
 
 	t.Run("a rejected config exits as a validation failure", func(t *testing.T) {
-		assert.Check(t, is.Equal(runFailureExitCode(watchState(rejected)), clierrors.ExitValidationFail))
+		assert.Check(t, is.Equal(runFailureExitCode(watchState(rejected, "")), clierrors.ExitValidationFail))
 	})
 
 	t.Run("a config error alongside a failed job stays a general error", func(t *testing.T) {
@@ -208,7 +213,7 @@ func TestWatchStateRunErrors(t *testing.T) {
 			Jobs: []jobOutput{{Name: "test", Phase: "ended", Outcome: "failed"}},
 		})
 
-		assert.Check(t, is.Equal(runFailureExitCode(watchState(withFailedJob)), clierrors.ExitGeneralError))
+		assert.Check(t, is.Equal(runFailureExitCode(watchState(withFailedJob, "")), clierrors.ExitGeneralError))
 	})
 
 	t.Run("a run with no errors is described by its outcome alone", func(t *testing.T) {
@@ -216,7 +221,7 @@ func TestWatchStateRunErrors(t *testing.T) {
 		state := watchState(runGetOutput{
 			Phase: "ended", CurrentOutcome: "failed",
 			Workflows: []workflowOutput{{Name: "build", Phase: "ended", Outcome: "failed"}},
-		})
+		}, "")
 
 		assert.Check(t, is.Equal(runFailureMessage(runID, state), "Run "+runID.String()+" failed."))
 		assert.Check(t, is.Equal(runFailureExitCode(state), clierrors.ExitGeneralError))

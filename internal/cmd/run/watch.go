@@ -277,6 +277,10 @@ func waitForRunBySHA(ctx context.Context, client *apiclient.Client, projectSlug,
 // functions the non-interactive path uses, so both agree on what a failed run
 // looks like.
 func watchInteractive(ctx context.Context, client *apiclient.Client, runID uuid.UUID, branch string, timeout time.Duration, failFast bool) error {
+	appURL, err := cmdutil.AppURL(ctx)
+	if failFast && err != nil {
+		return err
+	}
 	model := ui.NewRunWatchFlow(ctx, ui.RunWatchFlowOptions{
 		RunID:    runID,
 		Branch:   branch,
@@ -289,7 +293,7 @@ func watchInteractive(ctx context.Context, client *apiclient.Client, runID uuid.
 			if err != nil {
 				return ui.RunWatchState{}, err
 			}
-			return watchState(state), nil
+			return watchState(state, appURL), nil
 		},
 	})
 
@@ -352,7 +356,7 @@ func watchUntilDone(ctx context.Context, client *apiclient.Client, runID uuid.UU
 				WithExitCode(clierrors.ExitAPIError)
 		}
 
-		state := watchState(raw)
+		state := watchState(raw, "")
 		elapsed := time.Since(start)
 
 		if fingerprint := watchFingerprint(state); fingerprint != prevFingerprint {
@@ -392,7 +396,12 @@ func watchUntilDone(ctx context.Context, client *apiclient.Client, runID uuid.UU
 // did it end. The status glyph and word come from the single-width
 // PhaseOutcomeSymbol/PhaseOutcomeText pair rather than PhaseOutcomeStatus, whose
 // emoji shortcodes only render when passed through markdown.
-func watchState(state runGetOutput) ui.RunWatchState {
+//
+// appURL is the CircleCI app host the rows link to, or "" to leave them
+// unlinked; the flow only draws links when color is on, so a caller that could
+// not resolve the host — or one running without a terminal — simply gets plain
+// names.
+func watchState(state runGetOutput, appURL string) ui.RunWatchState {
 	out := ui.RunWatchState{
 		Workflows:         make([]ui.RunWatchWorkflow, 0, len(state.Workflows)),
 		Errors:            watchErrors(state.Errors),
@@ -403,21 +412,30 @@ func watchState(state runGetOutput) ui.RunWatchState {
 	}
 	for _, wf := range state.Workflows {
 		row := ui.RunWatchWorkflow{
-			Name:     wf.Name,
-			Symbol:   apiclient.PhaseOutcomeSymbol(wf.Phase, wf.Outcome, wf.CurrentOutcome),
-			Status:   apiclient.PhaseOutcomeText(wf.Phase, wf.Outcome, wf.CurrentOutcome),
-			Duration: wf.Duration,
-			Jobs:     make([]ui.RunWatchJob, 0, len(wf.Jobs)),
+			Name:      wf.Name,
+			Symbol:    apiclient.PhaseOutcomeSymbol(wf.Phase, wf.Outcome, wf.CurrentOutcome),
+			Status:    apiclient.PhaseOutcomeText(wf.Phase, wf.Outcome, wf.CurrentOutcome),
+			CreatedAt: wf.createdAt,
+			EndedAt:   wf.endedAt,
+			Jobs:      make([]ui.RunWatchJob, 0, len(wf.Jobs)),
+		}
+		if appURL != "" {
+			row.URL = cmdutil.WorkflowURL(appURL, wf.ID)
 		}
 		for _, j := range wf.Jobs {
-			row.Jobs = append(row.Jobs, ui.RunWatchJob{
-				ID:     j.ID,
-				Name:   j.Name,
-				Symbol: apiclient.PhaseOutcomeSymbol(j.Phase, j.Outcome, j.CurrentOutcome),
-				Status: apiclient.PhaseOutcomeText(j.Phase, j.Outcome, j.CurrentOutcome),
-				Type:   j.Type,
-				Failed: j.Outcome == "failed",
-			})
+			job := ui.RunWatchJob{
+				ID:        j.ID,
+				Name:      j.Name,
+				Symbol:    apiclient.PhaseOutcomeSymbol(j.Phase, j.Outcome, j.CurrentOutcome),
+				Status:    apiclient.PhaseOutcomeText(j.Phase, j.Outcome, j.CurrentOutcome),
+				StartedAt: j.startedAt,
+				EndedAt:   j.endedAt,
+				Failed:    j.Outcome == "failed",
+			}
+			if appURL != "" {
+				job.URL = cmdutil.JobURL(appURL, wf.ID, j.ID)
+			}
+			row.Jobs = append(row.Jobs, job)
 		}
 		out.Workflows = append(out.Workflows, row)
 	}

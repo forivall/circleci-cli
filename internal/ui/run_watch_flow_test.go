@@ -106,25 +106,28 @@ func runningState() ui.RunWatchState {
 		Symbol: "●",
 		Status: "running",
 		Jobs: []ui.RunWatchJob{
-			{ID: uuid.New(), Name: "lint", Symbol: "✓", Status: "succeeded", Type: "build"},
-			{ID: uuid.New(), Name: "unit-test", Symbol: "●", Status: "running", Type: "build"},
+			{ID: uuid.New(), Name: "lint", Symbol: "✓", Status: "succeeded"},
+			{ID: uuid.New(), Name: "unit-test", Symbol: "●", Status: "running"},
 		},
 	}}}
 }
 
 // doneState is the same run, finished and green.
 func doneState() ui.RunWatchState {
+	start := time.Date(2026, 1, 2, 15, 4, 5, 0, time.UTC)
+	end := start.Add(62 * time.Second)
 	return ui.RunWatchState{
 		Done:    true,
 		Outcome: "succeeded",
 		Workflows: []ui.RunWatchWorkflow{{
-			Name:     "build-and-test",
-			Symbol:   "✓",
-			Status:   "succeeded",
-			Duration: "1m2s",
+			Name:      "build-and-test",
+			Symbol:    "✓",
+			Status:    "succeeded",
+			CreatedAt: start,
+			EndedAt:   &end,
 			Jobs: []ui.RunWatchJob{
-				{ID: uuid.New(), Name: "lint", Symbol: "✓", Status: "succeeded", Type: "build"},
-				{ID: uuid.New(), Name: "test", Symbol: "✓", Status: "succeeded", Type: "build"},
+				{ID: uuid.New(), Name: "lint", Symbol: "✓", Status: "succeeded", StartedAt: &start, EndedAt: &end},
+				{ID: uuid.New(), Name: "test", Symbol: "✓", Status: "succeeded", StartedAt: &start, EndedAt: &end},
 			},
 		}},
 	}
@@ -139,8 +142,8 @@ func failedJobState() ui.RunWatchState {
 		Symbol: "●",
 		Status: "running",
 		Jobs: []ui.RunWatchJob{
-			{ID: failedID, Name: "test", Symbol: "✗", Status: "failed", Type: "build", Failed: true},
-			{ID: uuid.New(), Name: "deploy", Symbol: "○", Status: "queued", Type: "build"},
+			{ID: failedID, Name: "test", Symbol: "✗", Status: "failed", Failed: true},
+			{ID: uuid.New(), Name: "deploy", Symbol: "○", Status: "queued"},
 		},
 	}}}
 }
@@ -347,6 +350,71 @@ func TestRunWatchFlow_ColorsStatusGlyphs(t *testing.T) {
 	})
 }
 
+// TestRunWatchFlow_LinksEachRowToTheApp confirms a row's name is drawn as a
+// hyperlink to its page in the CircleCI app, so a name on screen can be clicked
+// through to. The URL is asserted inside the OSC-8 wrapper, since the visible
+// text alone cannot show that the row is a link; with color off there are no
+// links at all, matching the flow's rule that it emits no escapes the user did
+// not ask for.
+func TestRunWatchFlow_LinksEachRowToTheApp(t *testing.T) {
+	const (
+		wfURL  = "https://app.circleci.com/workflow/wf-1"
+		jobURL = "https://app.circleci.com/workflow/wf-1/job/job-1"
+	)
+	state := ui.RunWatchState{Workflows: []ui.RunWatchWorkflow{{
+		Name: "build", Symbol: "●", Status: "running", URL: wfURL,
+		Jobs: []ui.RunWatchJob{
+			{Name: "lint", Symbol: "✓", Status: "succeeded", URL: jobURL},
+		},
+	}}}
+	fetch, _ := fetchStatic(state)
+
+	t.Run("with color", func(t *testing.T) {
+		tm := startWatch(t, ui.RunWatchFlowOptions{Branch: "main", Color: true, Fetch: fetch})
+		waitForOutput(t, tm, "build")
+		raw := flowFrame(t, tm)
+
+		// The link wrapper is OSC 8: ESC ] 8 ; ; <url> ST, the text, then a closing
+		// wrapper with no URL. Assert on the opening wrapper so a URL that merely
+		// appeared as text would not satisfy it.
+		assert.Check(t, cmp.Contains(raw, "\x1b]8;;"+wfURL), "the workflow name should link to its app page")
+		assert.Check(t, cmp.Contains(raw, "\x1b]8;;"+jobURL), "the job name should link to its app page")
+	})
+
+	t.Run("without color", func(t *testing.T) {
+		tm := startWatch(t, ui.RunWatchFlowOptions{Branch: "main", Fetch: fetch})
+		waitForOutput(t, tm, "build")
+		raw := flowFrame(t, tm)
+
+		assert.Check(t, !strings.Contains(raw, "\x1b]8;;"), "no color means no link escapes: %q", raw)
+		assert.Check(t, cmp.Contains(ansi.Strip(raw), "build"), "the name itself is still drawn")
+	})
+}
+
+// TestRunWatchFlow_ShowsRowTimings confirms each row's trailing column carries
+// how long it has run, and that a row that has not started shows none — the
+// difference between a job working and one merely queued.
+func TestRunWatchFlow_ShowsRowTimings(t *testing.T) {
+	start := time.Date(2026, 1, 2, 15, 4, 5, 0, time.Local)
+	state := ui.RunWatchState{Workflows: []ui.RunWatchWorkflow{{
+		Name: "build", Symbol: "●", Status: "running", CreatedAt: start,
+		Jobs: []ui.RunWatchJob{
+			{Name: "lint", Symbol: "●", Status: "running", StartedAt: &start},
+			{Name: "deploy", Symbol: "○", Status: "queued"},
+		},
+	}}}
+	fetch, _ := fetchStatic(state)
+
+	tm := startWatch(t, ui.RunWatchFlowOptions{Branch: "main", Fetch: fetch})
+	waitForOutput(t, tm, "deploy")
+	view := flowSnapshot(t, tm)
+
+	assert.Check(t, cmp.Contains(watchRow(t, view, "lint"), "@ 15:04:05"),
+		"a started row shows the window it has been running in")
+	assert.Check(t, !strings.Contains(watchRow(t, view, "deploy"), "@"),
+		"a row that has not started has no timing to show")
+}
+
 // TestRunWatchFlow_PollsUntilTheRunEnds confirms the flow keeps polling on its
 // own and ends the moment a poll reports every workflow finished, carrying the
 // run's outcome out in the result.
@@ -491,8 +559,8 @@ func TestRunWatchFlow_TruncatesLongNames(t *testing.T) {
 	state := ui.RunWatchState{Workflows: []ui.RunWatchWorkflow{{
 		Name: "build", Symbol: "●", Status: "running",
 		Jobs: []ui.RunWatchJob{
-			{Name: long, Symbol: "●", Status: "running", Type: "build"},
-			{Name: "lint", Symbol: "✓", Status: "succeeded", Type: "build"},
+			{Name: long, Symbol: "●", Status: "running"},
+			{Name: "lint", Symbol: "✓", Status: "succeeded"},
 		},
 	}}}
 	fetch, _ := fetchStatic(state)

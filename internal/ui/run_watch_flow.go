@@ -32,6 +32,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/google/uuid"
 
@@ -73,28 +74,45 @@ const (
 	runWatchMeterEmpty = "▱"
 )
 
+// runWatchClockLayout is how a row's timing column renders a timestamp: a plain
+// 24-hour clock, paired with the compact duration beside it.
+const runWatchClockLayout = "15:04:05"
+
 // RunWatchJob is one job row in the watch table. Symbol is the uncolored status
 // glyph (the flow colors it when color is enabled) and Status the matching word,
 // kept apart so the word can be padded into a fixed-width column without the
 // glyph's width throwing the alignment off. Failed marks a job whose outcome is
 // a failure, which is what --failfast trips on and what the final error's
 // suggestions are built from.
+//
+// URL is the job's page in the CircleCI app, and StartedAt/EndedAt are its
+// timings; the flow renders the name as a link and the timings as the row's
+// trailing column. All three are supplied by the caller — this package stays
+// independent of internal/apiclient and of the app-URL helpers the command layer
+// owns — and all three may be empty: a queued job has not started yet, and a
+// caller that could not resolve the app URL passes no links at all.
 type RunWatchJob struct {
-	ID     uuid.UUID
-	Name   string
-	Symbol string
-	Status string
-	Type   string
-	Failed bool
+	ID        uuid.UUID
+	Name      string
+	URL       string
+	Symbol    string
+	Status    string
+	StartedAt *time.Time
+	EndedAt   *time.Time
+	Failed    bool
 }
 
-// RunWatchWorkflow is one workflow row and the job rows nested under it.
+// RunWatchWorkflow is one workflow row and the job rows nested under it. URL and
+// the timings mean what they do on RunWatchJob; a workflow that has not ended has
+// no EndedAt, and one that has not started has neither.
 type RunWatchWorkflow struct {
-	Name     string
-	Symbol   string
-	Status   string
-	Duration string
-	Jobs     []RunWatchJob
+	Name      string
+	URL       string
+	Symbol    string
+	Status    string
+	CreatedAt time.Time
+	EndedAt   *time.Time
+	Jobs      []RunWatchJob
 }
 
 // RunWatchError is one error the run carries in its own right, rather than the
@@ -591,24 +609,59 @@ func (m RunWatchFlowModel) pollMeter(remaining time.Duration) string {
 		strings.Repeat(runWatchMeterEmpty, runWatchMeterCells-filled)
 }
 
-// workflowRow renders a workflow's name, status and duration. A workflow that
-// has not finished has no duration yet, so the column is simply absent.
+// workflowRow renders a workflow's name, status and timing. The name links to
+// the workflow in the CircleCI app and the trailing column is how long it has
+// run and the clock window it ran in — live for a workflow still going, since
+// the flow redraws every second.
 func (m RunWatchFlowModel) workflowRow(wf RunWatchWorkflow) string {
 	return fmt.Sprintf("  %s  %s %s  %s",
-		pad(wf.Name, runWatchWorkflowNameCol),
+		pad(m.link(wf.Name, wf.URL), runWatchWorkflowNameCol),
 		colorizeStatusIcon(wf.Symbol, m.opts.Color),
 		colorizeStatusWord(wf.Symbol, wf.Status, m.opts.Color),
-		wf.Duration)
+		m.timing(&wf.CreatedAt, wf.EndedAt))
 }
 
-// jobRow renders one job, indented under its workflow, with the job type in the
-// trailing column.
+// jobRow renders one job, indented under its workflow, with the same link and
+// timing columns as its workflow's row.
 func (m RunWatchFlowModel) jobRow(j RunWatchJob) string {
 	return fmt.Sprintf("    %s  %s %s  %s",
-		pad(j.Name, runWatchJobNameCol),
+		pad(m.link(j.Name, j.URL), runWatchJobNameCol),
 		colorizeStatusIcon(j.Symbol, m.opts.Color),
 		colorizeStatusWord(j.Symbol, j.Status, m.opts.Color),
-		j.Type)
+		m.timing(j.StartedAt, j.EndedAt))
+}
+
+// link renders a row's name as a clickable OSC-8 hyperlink to its page in the
+// CircleCI app — the watch table's answer to the link the older watcher drew on
+// every workflow and job name. Links are emitted only alongside color, and only
+// when the caller resolved an app URL: a terminal that asked for no escapes
+// (NO_COLOR, no TTY, TERM=dumb) gets the plain name, which still names the row.
+func (m RunWatchFlowModel) link(text, url string) string {
+	if !m.opts.Color || url == "" {
+		return text
+	}
+	return lipgloss.NewStyle().Hyperlink(url).Render(text)
+}
+
+// timing is the trailing column of a row: how long the workflow or job has run
+// and the clock window it ran in ("1m2s  @ 12:00:00 → 12:01:02"). A row that has
+// not started has no timing yet, so the column is absent — a queued job shows
+// nothing where a running one shows its elapsed time. The duration of a row
+// still going is measured against the current clock, so it grows with the
+// footer's elapsed figure rather than freezing at whatever the last poll said.
+func (m RunWatchFlowModel) timing(start *time.Time, end *time.Time) string {
+	if start == nil || start.IsZero() {
+		return ""
+	}
+	d := time.Since(*start)
+	if end != nil {
+		d = end.Sub(*start)
+	}
+	clock := start.Local().Format(runWatchClockLayout)
+	if end != nil {
+		clock += " → " + end.Local().Format(runWatchClockLayout)
+	}
+	return m.muted(FormatElapsed(d) + "  @ " + clock)
 }
 
 // colorizeStatusWord renders a status word in the same theme color as its glyph,

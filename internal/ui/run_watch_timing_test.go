@@ -23,6 +23,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -85,4 +86,39 @@ func TestPollMeterFill(t *testing.T) {
 			assert.Check(t, cmp.Equal(m.pollMeter(tc.remaining), tc.want))
 		})
 	}
+}
+
+// TestTimingColumn pins what a row's trailing column reads. The three cases are
+// drawn differently on purpose: an ended row reports its own duration and the
+// window it ran in, a running one counts up from its start (so it moves with the
+// footer's elapsed clock rather than freezing at the last poll's figure), and a
+// row that has not started shows nothing at all.
+//
+// The times are built in the local zone the column renders in, so the clock
+// figures are asserted as written rather than shifted by the test machine's
+// timezone.
+func TestTimingColumn(t *testing.T) {
+	m := RunWatchFlowModel{}
+	start := time.Date(2026, 1, 2, 15, 4, 5, 0, time.Local)
+
+	t.Run("an ended row reports its duration and window", func(t *testing.T) {
+		end := start.Add(62 * time.Second)
+		got := m.timing(&start, &end)
+
+		assert.Check(t, cmp.Contains(got, "1m2s"))
+		assert.Check(t, cmp.Contains(got, "@ 15:04:05 → 15:05:07"))
+	})
+
+	t.Run("a running row counts up from its start", func(t *testing.T) {
+		running := time.Now().Add(-2 * time.Minute)
+		got := m.timing(&running, nil)
+
+		assert.Check(t, cmp.Contains(got, "2m0s"), "a running row counts elapsed time")
+		assert.Check(t, !strings.Contains(got, "→"), "a row still going has no end time to show")
+	})
+
+	t.Run("a row that has not started has no column", func(t *testing.T) {
+		notStarted := time.Time{}
+		assert.Check(t, cmp.Equal(m.timing(&notStarted, nil), ""))
+	})
 }
