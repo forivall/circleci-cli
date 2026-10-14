@@ -74,8 +74,10 @@ const (
 	runWatchMeterEmpty = "▱"
 )
 
-// runWatchClockLayout is how a row's timing column renders a timestamp: a plain
-// 24-hour clock, paired with the compact duration beside it.
+// runWatchClockLayout is how a row's timing column renders a timestamp when the
+// caller supplied no locale-specific layout: a plain 24-hour clock, paired with
+// the compact duration beside it. A caller that consulted the locale passes the
+// user's own hour cycle through RunWatchFlowOptions.ClockLayout instead.
 const runWatchClockLayout = "15:04:05"
 
 // RunWatchJob is one job row in the watch table. Symbol is the uncolored status
@@ -200,6 +202,14 @@ type RunWatchFlowOptions struct {
 	// environment itself. Empty means the plain 24-hour default.
 	ClockLayout string
 
+	// Theme is the resolved color theme the table draws in — the palette the
+	// --theme flag or the stored "theme" setting selected, with "auto" already
+	// resolved against the terminal (see iostream.ResolvedTheme). Empty means the
+	// house palette. It is ignored when Color is false, and when the theme itself
+	// is a plain one ("ascii", "notty"): either way the table draws no escapes at
+	// all.
+	Theme string
+
 	// FailFast ends the watch as soon as any job has failed, without waiting for
 	// the rest of the run.
 	FailFast bool
@@ -249,8 +259,9 @@ var runWatchKeys = []key.Binding{components.BindRefresh, components.BindQuit}
 // The program is deliberately inline rather than full-screen: the final frame is
 // the completed table, and the caller's summary line prints directly beneath it.
 type RunWatchFlowModel struct {
-	ctx  context.Context
-	opts RunWatchFlowOptions
+	ctx     context.Context
+	opts    RunWatchFlowOptions
+	palette theme.Palette
 
 	width  int
 	start  time.Time
@@ -288,15 +299,37 @@ func NewRunWatchFlow(ctx context.Context, opts RunWatchFlowOptions) RunWatchFlow
 	if opts.MaxPollInterval <= 0 {
 		opts.MaxPollInterval = RunWatchMaxPollInterval
 	}
+	palette := resolvePalette(opts)
+	spin := components.NewSpinner(opts.Color)
+	// The shared spinner draws its glyph in the house accent, and has no theme of
+	// its own to consult; override it with the table's, so the spinner that leads
+	// the table is drawn in the same theme the table is.
+	spin.Style = palette.Accent
 	return RunWatchFlowModel{
 		ctx:      ctx,
 		opts:     opts,
+		palette:  palette,
 		start:    time.Now(),
-		spin:     components.NewSpinner(opts.Color),
+		spin:     spin,
 		nextWait: opts.PollInterval,
 		// Init's first act is to fetch, so the model starts mid-poll.
 		polling: true,
 	}
+}
+
+// resolvePalette picks the theme the table draws in. Color off means the plain
+// palette whatever theme was named — a terminal that asked for no escapes must
+// not get them from the theme either — and an unset theme means the house
+// palette rather than a lookup miss, so a caller that only ever sets Color keeps
+// the table it had.
+func resolvePalette(opts RunWatchFlowOptions) theme.Palette {
+	if !opts.Color {
+		return theme.PlainPalette()
+	}
+	if opts.Theme == "" {
+		return theme.DefaultPalette()
+	}
+	return theme.PaletteFor(opts.Theme)
 }
 
 // Result returns the final outcome. Only valid after tea.Program.Run() returns.
@@ -522,17 +555,15 @@ func (m RunWatchFlowModel) buildView() tea.View {
 
 // header names the run being watched: the ID, so it can be pasted into another
 // command, and the branch it belongs to in the secondary color the pickers use
-// for a scope.
+// for a scope. Both read their tone from the table's palette, so a themed watch
+// carries the theme into its header; with a plain palette the styles render
+// their text unchanged and the header is simply uncolored.
 func (m RunWatchFlowModel) header() string {
-	title := theme.TitleStyle.Render("Watching run " + m.opts.RunID.String())
+	title := m.palette.Title.Render("Watching run " + m.opts.RunID.String())
 	if m.opts.Branch == "" {
 		return title
 	}
-	scope := "[" + m.opts.Branch + "]"
-	if m.opts.Color {
-		scope = theme.SecondaryStyle.Render(scope)
-	}
-	return title + " " + scope
+	return title + " " + m.palette.Secondary.Render("["+m.opts.Branch+"]")
 }
 
 // pendingNote explains a table that looks finished but is not: every workflow the
@@ -563,7 +594,7 @@ func (m RunWatchFlowModel) footer() string {
 	}
 	return m.line("  "+m.spinnerPrefix()+
 		m.muted("Elapsed "+FormatElapsed(m.elapsed())+" · "+m.nextPollNote())) +
-		m.line("  "+components.Hints(runWatchKeys...))
+		m.line("  "+components.HintsStyled(m.palette.Muted, runWatchKeys...))
 }
 
 // nextPollNote says when the run's status is next checked: a meter filling
@@ -622,8 +653,8 @@ func (m RunWatchFlowModel) pollMeter(remaining time.Duration) string {
 func (m RunWatchFlowModel) workflowRow(wf RunWatchWorkflow) string {
 	return fmt.Sprintf("  %s  %s %s  %s",
 		pad(m.link(wf.Name, wf.URL), runWatchWorkflowNameCol),
-		colorizeStatusIcon(wf.Symbol, m.opts.Color),
-		colorizeStatusWord(wf.Symbol, wf.Status, m.opts.Color),
+		m.palette.StatusText(wf.Symbol, wf.Symbol),
+		m.statusWord(wf.Symbol, wf.Status),
 		m.timing(&wf.CreatedAt, wf.EndedAt))
 }
 
@@ -632,18 +663,20 @@ func (m RunWatchFlowModel) workflowRow(wf RunWatchWorkflow) string {
 func (m RunWatchFlowModel) jobRow(j RunWatchJob) string {
 	return fmt.Sprintf("    %s  %s %s  %s",
 		pad(m.link(j.Name, j.URL), runWatchJobNameCol),
-		colorizeStatusIcon(j.Symbol, m.opts.Color),
-		colorizeStatusWord(j.Symbol, j.Status, m.opts.Color),
+		m.palette.StatusText(j.Symbol, j.Symbol),
+		m.statusWord(j.Symbol, j.Status),
 		m.timing(j.StartedAt, j.EndedAt))
 }
 
 // link renders a row's name as a clickable OSC-8 hyperlink to its page in the
 // CircleCI app — the watch table's answer to the link the older watcher drew on
-// every workflow and job name. Links are emitted only alongside color, and only
-// when the caller resolved an app URL: a terminal that asked for no escapes
-// (NO_COLOR, no TTY, TERM=dumb) gets the plain name, which still names the row.
+// every workflow and job name. Links are emitted only when the palette draws
+// escapes at all — which is also false with no color and under the plain themes
+// — and only when the caller resolved an app URL: a terminal that asked for no
+// escapes (NO_COLOR, no TTY, TERM=dumb) gets the plain name, which still names
+// the row.
 func (m RunWatchFlowModel) link(text, url string) string {
-	if !m.opts.Color || url == "" {
+	if m.palette.Plain || url == "" {
 		return text
 	}
 	return lipgloss.NewStyle().Hyperlink(url).Render(text)
@@ -682,22 +715,15 @@ func (m RunWatchFlowModel) clockLayout() string {
 	return runWatchClockLayout
 }
 
-// colorizeStatusWord renders a status word in the same theme color as its glyph,
-// so the two read as one unit — the watch table's answer to the inverse-video
-// badge the older watcher drew, without the block of background that made a
-// finished row shout as loudly as a running one. The word is padded before it is
-// colored, so it occupies exactly the same cells with or without color and the
-// columns stay aligned. As with colorizeStatusIcon, an unknown symbol — and every
-// symbol when color is off — leaves the word plain.
-func colorizeStatusWord(symbol, word string, color bool) string {
-	padded := pad(word, runWatchStatusCol)
-	if !color {
-		return padded
-	}
-	if style, ok := statusIconStyle(symbol); ok {
-		return style.Render(padded)
-	}
-	return padded
+// statusWord renders a status word in the same color as its glyph, so the two
+// read as one unit — the watch table's answer to the inverse-video badge the
+// older watcher drew, without the block of background that made a finished row
+// shout as loudly as a running one. The word is padded before it is colored, so
+// it occupies exactly the same cells with or without color and the columns stay
+// aligned. An unknown symbol — and every symbol under a plain palette — leaves
+// the word plain, as the glyph does.
+func (m RunWatchFlowModel) statusWord(symbol, word string) string {
+	return m.palette.StatusText(symbol, pad(word, runWatchStatusCol))
 }
 
 // line trims a row's trailing padding, fits it to the terminal width, and
@@ -721,12 +747,10 @@ func (m RunWatchFlowModel) spinnerPrefix() string {
 	return m.spin.View() + " "
 }
 
-// muted de-emphasizes footer text, leaving it plain when color is off.
+// muted de-emphasizes footer and timing text in the table's palette, leaving it
+// plain when that palette draws no escapes.
 func (m RunWatchFlowModel) muted(s string) string {
-	if m.opts.Color {
-		return theme.HelperStyle.Render(s)
-	}
-	return s
+	return m.palette.Muted.Render(s)
 }
 
 // pad fits s to exactly w cells: padded with spaces when short, truncated with an

@@ -99,7 +99,7 @@ type PagerModel struct {
 // NewPager returns an empty pager. Chain WithKeys / WithReflow / WithContent to
 // configure it before use.
 func NewPager() PagerModel {
-	return PagerModel{search: newSearchState(), help: footerHelp()}
+	return PagerModel{search: newSearchState(), help: footerHelp(houseMutedStyle())}
 }
 
 // WithKeys sets the footer key bindings (e.g. BindScroll, BindSearch, BindQuit).

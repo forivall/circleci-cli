@@ -350,6 +350,60 @@ func TestRunWatchFlow_ColorsStatusGlyphs(t *testing.T) {
 	})
 }
 
+// TestRunWatchFlow_DrawsInTheConfiguredTheme confirms the table draws in the
+// theme the caller resolved rather than always in the house colors — the point
+// of threading `circleci setting set theme` through to the TUI. Each case names
+// the SGR sequence its theme should produce, so a theme that were ignored would
+// still be caught.
+func TestRunWatchFlow_DrawsInTheConfiguredTheme(t *testing.T) {
+	state := ui.RunWatchState{Workflows: []ui.RunWatchWorkflow{{
+		Name: "build", Symbol: "●", Status: "running",
+		Jobs: []ui.RunWatchJob{
+			{Name: "lint", Symbol: "✓", Status: "succeeded"},
+		},
+	}}}
+	fetch, _ := fetchStatic(state)
+
+	t.Run("a branded theme supplies the colors", func(t *testing.T) {
+		tm := startWatch(t, ui.RunWatchFlowOptions{
+			Branch: "main", Color: true, Theme: "dracula", Fetch: fetch,
+		})
+		waitForOutput(t, tm, "build")
+		raw := flowFrame(t, tm)
+
+		// Dracula's green and gold: the success glyph and the header's branch scope.
+		assert.Check(t, cmp.Contains(raw, "38;5;84m✓"), "the tick should wear dracula's green")
+		assert.Check(t, cmp.Contains(raw, "38;5;141m[main]"), "the scope should wear dracula's secondary tone")
+		assert.Check(t, !strings.Contains(raw, "38;5;42m"), "the house green must not leak into a themed table")
+	})
+
+	t.Run("no theme keeps the house colors", func(t *testing.T) {
+		// The backward-compatible case: a caller that only ever set Color must get
+		// exactly the table it got before themes were threaded through.
+		tm := startWatch(t, ui.RunWatchFlowOptions{
+			Branch: "main", Color: true, Fetch: fetch,
+		})
+		waitForOutput(t, tm, "build")
+		raw := flowFrame(t, tm)
+
+		assert.Check(t, cmp.Contains(raw, "38;5;42m✓"), "the tick should wear the house green")
+		assert.Check(t, cmp.Contains(raw, "38;5;179m[main]"), "the scope should wear the house secondary tone")
+	})
+
+	t.Run("a plain theme outranks color being on", func(t *testing.T) {
+		// "ascii" and "notty" mean plain text, not merely uncolored: the palette must
+		// suppress every escape, so stripping ANSI from the frame changes nothing.
+		tm := startWatch(t, ui.RunWatchFlowOptions{
+			Branch: "main", Color: true, Theme: "ascii", Fetch: fetch,
+		})
+		waitForOutput(t, tm, "build")
+		raw := flowFrame(t, tm)
+
+		assert.Check(t, cmp.Equal(ansi.Strip(raw), raw), "a plain theme must emit no escapes: %q", raw)
+		assert.Check(t, cmp.Contains(raw, "[main]"), "the scope is still shown, just uncolored")
+	})
+}
+
 // TestRunWatchFlow_LinksEachRowToTheApp confirms a row's name is drawn as a
 // hyperlink to its page in the CircleCI app, so a name on screen can be clicked
 // through to. The URL is asserted inside the OSC-8 wrapper, since the visible

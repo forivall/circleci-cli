@@ -122,3 +122,25 @@ func TestTimingColumn(t *testing.T) {
 		assert.Check(t, cmp.Equal(m.timing(&notStarted, nil), ""))
 	})
 }
+
+// TestTimingColumnLocale pins that the clock layout the caller supplies is what
+// the column renders with. The command layer resolves the user's locale and
+// passes the matching layout down; a locale that reads times as "3:04:05 PM"
+// must see that hour cycle in the table, not the 24-hour default, and a caller
+// that passes no layout keeps the default rather than getting nothing.
+func TestTimingColumnLocale(t *testing.T) {
+	start := time.Date(2026, 1, 2, 15, 4, 5, 0, time.Local)
+	end := start.Add(62 * time.Second)
+
+	t.Run("the caller's layout is used", func(t *testing.T) {
+		m := RunWatchFlowModel{opts: RunWatchFlowOptions{ClockLayout: "3:04:05 PM"}}
+
+		assert.Check(t, cmp.Contains(m.timing(&start, &end), "@ 3:04:05 PM → 3:05:07 PM"))
+	})
+
+	t.Run("no layout falls back to the 24-hour default", func(t *testing.T) {
+		m := RunWatchFlowModel{}
+
+		assert.Check(t, cmp.Contains(m.timing(&start, &end), "@ 15:04:05 → 15:05:07"))
+	})
+}

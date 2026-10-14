@@ -239,6 +239,7 @@ func (d runFilterDialog) newStatusSelect(idx int) components.SelectModel {
 // secondary) for the "all statuses" no-filter entry, the picker's colored status
 // symbol otherwise.
 func (d runFilterDialog) statusIcons() []string {
+	palette := theme.DefaultPaletteFor(d.color)
 	icons := make([]string, len(d.statuses))
 	for i, s := range d.statuses {
 		if s.Value == "" { // the "all statuses" star
@@ -252,7 +253,7 @@ func (d runFilterDialog) statusIcons() []string {
 			icons[i] = star
 			continue
 		}
-		icons[i] = colorizeStatusIcon(s.Icon, d.color)
+		icons[i] = colorizeStatusIcon(s.Icon, palette)
 	}
 	return icons
 }

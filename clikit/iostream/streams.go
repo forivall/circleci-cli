@@ -292,6 +292,16 @@ func SpinnerEnabled(ctx context.Context) bool {
 	return fromContext(ctx).SpinnerEnabled()
 }
 
+// ResolvedTheme returns the concrete color theme the streams were built with,
+// after "auto" has been resolved against the terminal background and the
+// --theme flag's precedence over the stored setting has been applied. It is the
+// name a view hands to theme.PaletteFor, so a TUI draws in the same theme as the
+// markdown around it; callers that only need to know whether color is on want
+// ColorEnabled instead.
+func ResolvedTheme(ctx context.Context) string {
+	return fromContext(ctx).ResolvedTheme()
+}
+
 func SymbolOK(ctx context.Context) string {
 	return fromContext(ctx).SymbolSuccess(theme.IconOK)
 }
@@ -464,6 +474,7 @@ type Streams struct {
 	slog  *slog.Logger
 	width int
 	style string
+	palette theme.Palette
 	// mdOpts are extra glamour options appended to every markdown render.
 	// See the mdOpts parameter on FromCmd.
 	mdOpts []glamour.TermRendererOption
@@ -535,9 +546,9 @@ func New(ctx context.Context, opts Options) context.Context {
 		stderr = os.Stderr
 	}
 
-	theme := opts.Theme
-	if theme == "" {
-		theme = themeAuto
+	themeOption := opts.Theme
+	if themeOption == "" {
+		themeOption = themeAuto
 	}
 
 	lvl := log.InfoLevel
@@ -545,7 +556,8 @@ func New(ctx context.Context, opts Options) context.Context {
 		lvl = log.DebugLevel
 	}
 
-	width, style := terminalProperties(theme, stdin, stdout)
+	width, style := terminalProperties(themeOption, stdin, stdout)
+	palette := theme.PaletteFor(themeOption)
 
 	return WithStreams(ctx, Streams{
 		Out:    stdout,
@@ -553,6 +565,7 @@ func New(ctx context.Context, opts Options) context.Context {
 		In:     stdin,
 		Quiet:  opts.Quiet,
 		style:  style,
+		palette: palette,
 		width:  width,
 		mdOpts: opts.MarkdownOptions,
 		slog: slog.New(log.NewWithOptions(stderr, log.Options{
@@ -673,12 +686,21 @@ func (s Streams) SpinnerEnabled() bool {
 	return s.IsInteractive() && !spinnerDisabled()
 }
 
+// ResolvedTheme returns the concrete color theme the streams were built with.
+// "auto" is already resolved here — terminalProperties turns it into "dark" or
+// "light" against the terminal background — so the name is one a palette lookup
+// recognizes, and the streams' own resolved style is returned rather than the
+// name re-resolved.
+func (s Streams) ResolvedTheme() string {
+	return s.style
+}
+
 func (s Streams) SymbolSuccess(strs ...string) string {
 	if !s.ColorEnabled() {
 		return theme.NoColorStyle.Render(strs...)
 	}
 
-	return theme.SuccessStyle.Render(strs...)
+	return s.palette.Success.Render(strs...)
 }
 
 func (s Streams) SymbolWarning(strs ...string) string {
@@ -686,7 +708,7 @@ func (s Streams) SymbolWarning(strs ...string) string {
 		return theme.NoColorStyle.Render(strs...)
 	}
 
-	return theme.WarningStyle.Render(strs...)
+	return s.palette.Warning.Render(strs...)
 }
 
 func (s Streams) SymbolError(strs ...string) string {
@@ -694,7 +716,7 @@ func (s Streams) SymbolError(strs ...string) string {
 		return theme.NoColorStyle.Render(strs...)
 	}
 
-	return theme.WarningStyle.Render(strs...)
+	return s.palette.Warning.Render(strs...)
 }
 
 func (s Streams) Title(strs ...string) string {
@@ -702,7 +724,7 @@ func (s Streams) Title(strs ...string) string {
 		return theme.NoColorStyle.Render(strs...)
 	}
 
-	return theme.TitleStyle.Render(strs...)
+	return s.palette.Title.Render(strs...)
 }
 
 // Warning renders strs in the warning (yellow) color, or plain when color is
@@ -712,7 +734,7 @@ func (s Streams) Warning(strs ...string) string {
 		return theme.NoColorStyle.Render(strs...)
 	}
 
-	return theme.WarningStyle.Render(strs...)
+	return s.palette.Warning.Render(strs...)
 }
 
 // Success renders strs in the success (green) color, or plain when color is
@@ -722,7 +744,7 @@ func (s Streams) Success(strs ...string) string {
 		return theme.NoColorStyle.Render(strs...)
 	}
 
-	return theme.SuccessStyle.Render(strs...)
+	return s.palette.Success.Render(strs...)
 }
 
 // Muted renders strs in the muted (gray) color, or plain when color is
@@ -732,7 +754,7 @@ func (s Streams) Muted(strs ...string) string {
 		return theme.NoColorStyle.Render(strs...)
 	}
 
-	return theme.HelperStyle.Render(strs...)
+	return s.palette.Muted.Render(strs...)
 }
 
 // Print writes a string to Out with no newline appended.

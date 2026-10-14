@@ -287,6 +287,7 @@ func watchInteractive(ctx context.Context, client *apiclient.Client, runID uuid.
 		Color:       iostream.ColorEnabled(ctx),
 		Animate:     iostream.SpinnerEnabled(ctx),
 		ClockLayout: iostream.ClockLayout(),
+		Theme:       iostream.ResolvedTheme(ctx),
 		FailFast:    failFast,
 		Timeout:     timeout,
 		Fetch: func(ctx context.Context) (ui.RunWatchState, error) {

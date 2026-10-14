@@ -203,7 +203,9 @@ type workflowOutput struct {
 	Duration       string      `json:"duration,omitempty"`
 	Jobs           []jobOutput `json:"jobs"`
 
-	// Raw timings behind Duration, for the watch table.
+	// The raw timings behind Duration, carried for the watch table's timing
+	// column, which counts a still-running row up rather than reporting a fixed
+	// figure. Unexported so they stay out of run get's --json contract.
 	createdAt time.Time
 	endedAt   *time.Time
 }

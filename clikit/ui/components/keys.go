@@ -119,13 +119,20 @@ func grouped(label, desc string, src ...key.Binding) key.Binding {
 	return key.NewBinding(key.WithKeys(keys...), key.WithHelp(label, desc))
 }
 
+// houseMutedStyle is the CLI's house footer gray. It is the style every
+// component that owns its own footer draws its hints in — components have no
+// theme of their own to consult, so a host that wants its footer in another
+// theme draws the footer itself with HintsStyled.
+func houseMutedStyle() lipgloss.Style {
+	return lipgloss.NewStyle().Foreground(theme.ColorMuted)
+}
+
 // footerHelp returns a help.Model configured to render footer key hints in the
-// CLI's house style: every segment muted (theme.ColorMuted) and joined with
-// " · ". Width is left at zero so lines are never truncated.
-func footerHelp() help.Model {
+// given muted style, joined with " · ". Width is left at zero so lines are never
+// truncated.
+func footerHelp(muted lipgloss.Style) help.Model {
 	h := help.New()
 	h.ShortSeparator = " · "
-	muted := lipgloss.NewStyle().Foreground(theme.ColorMuted)
 	h.Styles.ShortKey = muted
 	h.Styles.ShortDesc = muted
 	h.Styles.ShortSeparator = muted
@@ -136,7 +143,16 @@ func footerHelp() help.Model {
 // Hints renders a one-line, muted footer for the given key bindings using the
 // shared house style. Use it for standalone footers a host draws itself (a
 // theme picker, a secret prompt); components that own their footer store the
-// bindings and render them internally.
+// bindings and render them internally. A host drawing in a theme of its own
+// wants HintsStyled instead.
 func Hints(bindings ...key.Binding) string {
-	return footerHelp().ShortHelpView(bindings)
+	return HintsStyled(houseMutedStyle(), bindings...)
+}
+
+// HintsStyled renders the footer with a caller-supplied muted style, so a themed
+// view can draw its key hints in the same palette as the rest of it — and a view
+// under a plain theme can pass a style that emits nothing, where Hints would
+// still write the house gray.
+func HintsStyled(muted lipgloss.Style, bindings ...key.Binding) string {
+	return footerHelp(muted).ShortHelpView(bindings)
 }

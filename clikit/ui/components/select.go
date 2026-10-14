@@ -64,7 +64,7 @@ func NewSelectModel(prompt string, options []string) SelectModel {
 		prompt:  prompt,
 		options: options,
 		keys:    []key.Binding{BindMove, BindSelect, BindQuitEsc},
-		help:    footerHelp(),
+		help:    footerHelp(houseMutedStyle()),
 	}
 }
 

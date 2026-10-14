@@ -676,8 +676,9 @@ const (
 // first picker it quits); ctrl+c quits anywhere. After Run() returns, read the
 // outcome with Result(); the caller then prints the corresponding summary.
 type RunGetFlowModel struct {
-	ctx  context.Context
-	opts RunGetFlowOptions
+	ctx     context.Context
+	opts    RunGetFlowOptions
+	palette theme.Palette
 
 	stage runGetStage
 
@@ -888,9 +889,11 @@ func NewRunGetFlow(ctx context.Context, opts RunGetFlowOptions) RunGetFlowModel 
 	if opts.Runs != nil {
 		stage = runGetStageRunSelect
 	}
+	palette := theme.DefaultPaletteFor(opts.Color)
 	m := RunGetFlowModel{
 		ctx:            ctx,
 		opts:           opts,
+		palette:        palette,
 		stage:          stage,
 		spin:           components.NewSpinner(opts.Color),
 		pager:          components.NewPager().WithKeys(stepPagerKeys...),
@@ -2446,7 +2449,7 @@ func (m RunGetFlowModel) newExecutionSelect() components.SelectModel {
 	}
 	for _, e := range m.executions {
 		labels = append(labels, e.Label)
-		icons = append(icons, colorizeStatusIcon(e.Icon, m.opts.Color))
+		icons = append(icons, colorizeStatusIcon(e.Icon, m.palette))
 	}
 	return components.NewSelectModel("Select an execution", labels).
 		WithIcons(icons).
@@ -2479,7 +2482,7 @@ func (m RunGetFlowModel) newStepSelect() components.SelectModel {
 	}
 	for _, s := range m.steps {
 		labels = append(labels, s.Label)
-		icons = append(icons, colorizeStatusIcon(s.Icon, m.opts.Color))
+		icons = append(icons, colorizeStatusIcon(s.Icon, m.palette))
 	}
 	// Resume on the remembered step (set when one was opened in the pager);
 	// otherwise land on the first failed step.
@@ -2506,7 +2509,7 @@ func (m RunGetFlowModel) newTestSelect() components.SelectModel {
 		icons = make([]string, len(m.tests))
 		for i, t := range m.tests {
 			labels[i] = t.Label
-			icons[i] = colorizeStatusIcon(t.Icon, m.opts.Color)
+			icons[i] = colorizeStatusIcon(t.Icon, m.palette)
 		}
 	}
 	return components.NewSelectModel("Select a failed test", labels).
@@ -2638,43 +2641,21 @@ func itemLabels(items []RunGetItem) []string {
 func (m RunGetFlowModel) itemIcons(items []RunGetItem) []string {
 	icons := make([]string, len(items))
 	for i, it := range items {
-		icons[i] = colorizeStatusIcon(it.Icon, m.opts.Color)
+		icons[i] = colorizeStatusIcon(it.Icon, m.palette)
 	}
 	return icons
 }
 
 // colorizeStatusIcon wraps a status symbol in its theme color. Unknown symbols
 // (and all symbols when color is off) are returned unchanged.
-func colorizeStatusIcon(symbol string, color bool) string {
-	if !color || symbol == "" {
+func colorizeStatusIcon(symbol string, palette theme.Palette) string {
+	if symbol == "" {
 		return symbol
 	}
-	if style, ok := statusIconStyle(symbol); ok {
+	if style, ok := palette.StatusStyle(symbol); ok {
 		return style.Render(symbol)
 	}
 	return symbol
-}
-
-// statusIconStyle maps a symbol from apiclient.PhaseOutcomeSymbol to a theme
-// color. The bool is false for symbols that should stay uncolored.
-func statusIconStyle(symbol string) (lipgloss.Style, bool) {
-	switch symbol {
-	case "✓":
-		return theme.SuccessStyle, true // succeeded
-	case "✗":
-		return theme.ErrorStyle, true // failed
-	case "!":
-		return theme.WarningStyle, true // errored / timed out
-	case "●":
-		return theme.RunningStyle, true // running
-	case "○", "⊘", "•":
-		// Created/queued, canceled, and the neutral bullet PhaseOutcomeSymbol falls
-		// back to for a phase or outcome it does not know. The bullet is muted for the
-		// same reason: uncolored, it reads as a filled dot much like the running one.
-		return theme.HelperStyle, true
-	default:
-		return lipgloss.Style{}, false
-	}
 }
 
 // artifactsIcon is the glyph for the "artifacts" option, muted like the other
