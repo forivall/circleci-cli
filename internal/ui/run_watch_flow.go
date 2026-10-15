@@ -264,6 +264,7 @@ type RunWatchFlowModel struct {
 	palette theme.Palette
 
 	width  int
+	height int
 	start  time.Time
 	spin   spinner.Model
 	state  RunWatchState
@@ -350,6 +351,7 @@ func (m RunWatchFlowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
+		m.height = msg.Height
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -526,28 +528,70 @@ func (m RunWatchFlowModel) clockDelay() time.Duration {
 // --- view ---
 
 func (m RunWatchFlowModel) View() tea.View {
+	// The final table is printed after Bubble Tea exits. Keeping this last frame
+	// empty lets the inline renderer clear its bounded live view without scrolling
+	// a taller completed table past the top of the terminal.
+	if m.done {
+		return tea.NewView("")
+	}
 	return components.WithWindowTitle(m.buildView(), components.FlowTitle("run watch"))
+}
+
+func (m RunWatchFlowModel) ViewTable() []string {
+	var rows []string
+	for _, wf := range m.state.Workflows {
+		rows = append(rows, m.workflowRow(wf))
+		for _, j := range wf.Jobs {
+			rows = append(rows, m.jobRow(j))
+		}
+	}
+	return rows
 }
 
 func (m RunWatchFlowModel) buildView() tea.View {
 	var b strings.Builder
-	b.WriteString(m.header() + "\n\n")
+	b.WriteString(m.ViewHeader() + "\n\n")
 
 	if !m.loaded {
 		b.WriteString(m.line("  " + m.spinnerPrefix() + m.muted("Fetching run status…")))
 		return tea.NewView(b.String())
 	}
 
-	for _, wf := range m.state.Workflows {
-		b.WriteString(m.line(m.workflowRow(wf)))
-		for _, j := range wf.Jobs {
-			b.WriteString(m.line(m.jobRow(j)))
+	rows := m.ViewTable()
+	note := m.pendingNote()
+	// Inline rendering scrolls the terminal when a frame is taller than its
+	// viewport. Once that happens the header (and therefore the run identity)
+	// disappears, including from the final frame. Keep the frame within the
+	// reported height and reserve room for the live footer; the omission marker
+	// makes a large workflow table visibly incomplete instead of silently
+	// scrolling its first rows away.
+	footer := m.footer()
+	// A live frame must fit the viewport to keep its header from scrolling away.
+	if m.height > 0 {
+		noteLines := 0
+		if note != "" {
+			noteLines = 1
+		}
+		footerAndSeparatorLines := 0
+		if footer != "" {
+			footerAndSeparatorLines = strings.Count(footer, "\n") + 1
+		}
+		available := max(0, m.height-2-noteLines-footerAndSeparatorLines)
+		if len(rows) > available {
+			if available > 0 {
+				rows = append(rows[:available-1], fmt.Sprintf("  … %d more rows", len(rows)-available+1))
+			} else {
+				rows = nil
+			}
 		}
 	}
-	if note := m.pendingNote(); note != "" {
+	for _, row := range rows {
+		b.WriteString(m.line(row))
+	}
+	if note != "" {
 		b.WriteString(m.line("  " + note))
 	}
-	if footer := m.footer(); footer != "" {
+	if footer != "" {
 		b.WriteString("\n" + footer)
 	}
 	return tea.NewView(b.String())
@@ -558,7 +602,7 @@ func (m RunWatchFlowModel) buildView() tea.View {
 // for a scope. Both read their tone from the table's palette, so a themed watch
 // carries the theme into its header; with a plain palette the styles render
 // their text unchanged and the header is simply uncolored.
-func (m RunWatchFlowModel) header() string {
+func (m RunWatchFlowModel) ViewHeader() string {
 	title := m.palette.Title.Render("Watching run " + m.opts.RunID.String())
 	if m.opts.Branch == "" {
 		return title

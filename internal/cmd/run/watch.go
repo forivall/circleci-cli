@@ -316,9 +316,14 @@ func watchInteractive(ctx context.Context, client *apiclient.Client, runID uuid.
 			err.Error()).WithExitCode(clierrors.ExitGeneralError)
 	}
 
-	res := final.(ui.RunWatchFlowModel).Result()
+	finalModel := final.(ui.RunWatchFlowModel)
+	res := finalModel.Result()
 
-	// Separate the table the program left on screen from the summary line.
+	// The interactive view is deliberately bounded to the terminal height. Print
+	// the header and table as stable output after Bubble Tea clears that view, so
+	// completed runs retain every row without scrolling the header away.
+	iostream.Printf(ctx, "%s\n\n", finalModel.ViewHeader())
+	iostream.Printf(ctx, "%s\n", strings.Join(finalModel.ViewTable(), "\n"))
 	iostream.ErrPrintf(ctx, "\n")
 
 	switch {
