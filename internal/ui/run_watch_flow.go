@@ -745,7 +745,8 @@ func (m RunWatchFlowModel) timing(start *time.Time, end *time.Time) string {
 	if end != nil {
 		clock += " → " + end.Local().Format(layout)
 	}
-	return m.muted(FormatElapsed(d) + "  @ " + clock)
+	return m.palette.Mute(m.palette.Warning).Render(FormatElapsed(d)) +
+		m.muted("  @ "+clock)
 }
 
 // clockLayout is the layout the timing column renders timestamps with: the

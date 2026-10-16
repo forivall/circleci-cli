@@ -22,7 +22,12 @@
 
 package theme
 
-import "charm.land/lipgloss/v2"
+import (
+	"image/color"
+	"slices"
+
+	"charm.land/lipgloss/v2"
+)
 
 // Semantic color tokens. Use these instead of raw lipgloss.Color values so
 // every widget speaks the same visual language, and a future palette swap
@@ -133,6 +138,7 @@ type Palette struct {
 	// "notty" themes. A view that would otherwise emit a non-color escape (an
 	// OSC-8 hyperlink, say) must consult this as well as whether color is on.
 	Plain bool
+	Ansi  bool
 }
 
 // StatusStyle maps a symbol from apiclient.PhaseOutcomeSymbol to this palette's
@@ -305,6 +311,7 @@ var (
 		Warning:   NoColorStyle,
 		Muted:     NoColorStyle,
 		Plain:     true,
+		Ansi:      true,
 	}
 )
 
@@ -312,8 +319,19 @@ var (
 // a plain title shared by all of them — bold with no color reads correctly on
 // any background, the same reason TitleStyle does.
 func brandedPalette(accent, secondary, running, success, errColor, warning, muted string) Palette {
+	ansi16Colors := [...]color.Color{
+		lipgloss.Black, lipgloss.Red, lipgloss.Green, lipgloss.Yellow,
+		lipgloss.Blue, lipgloss.Magenta, lipgloss.Cyan, lipgloss.White,
+		lipgloss.BrightBlack, lipgloss.BrightRed, lipgloss.BrightGreen, lipgloss.BrightYellow,
+		lipgloss.BrightBlue, lipgloss.BrightMagenta, lipgloss.BrightCyan, lipgloss.BrightWhite,
+	}
+	Ansi := true
 	fg := func(c string) lipgloss.Style {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(c))
+		s := lipgloss.NewStyle().Foreground(lipgloss.Color(c))
+		if !slices.Contains(ansi16Colors[:], s.GetForeground()) {
+			Ansi = false
+		}
+		return s
 	}
 	return Palette{
 		Title:     TitleStyle,
@@ -324,7 +342,22 @@ func brandedPalette(accent, secondary, running, success, errColor, warning, mute
 		Error:     fg(errColor),
 		Warning:   fg(warning),
 		Muted:     fg(muted),
+		Ansi:      Ansi,
 	}
+}
+
+// Mute applies the palette's muted treatment to a style. ANSI palettes use
+// faint so the original color remains intact; other palettes blend the style's
+// foreground with the muted color.
+func (p Palette) Mute(s lipgloss.Style) lipgloss.Style {
+	if p.Plain {
+		return NoColorStyle
+	}
+	if p.Ansi {
+		return lipgloss.NewStyle().Inherit(s).Faint(true)
+	}
+	colors := lipgloss.Blend1D(3, s.GetForeground(), p.Muted.GetForeground())
+	return lipgloss.NewStyle().Foreground(colors[1])
 }
 
 // Status icons. Keep these in one place so prompts, results, and JSON-text
