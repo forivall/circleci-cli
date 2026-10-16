@@ -102,6 +102,8 @@ type RunWatchJob struct {
 	StartedAt *time.Time
 	EndedAt   *time.Time
 	Failed    bool
+	RunsDone  int
+	RunsTotal int
 }
 
 // RunWatchWorkflow is one workflow row and the job rows nested under it. URL and
@@ -705,10 +707,14 @@ func (m RunWatchFlowModel) workflowRow(wf RunWatchWorkflow) string {
 // jobRow renders one job, indented under its workflow, with the same link and
 // timing columns as its workflow's row.
 func (m RunWatchFlowModel) jobRow(j RunWatchJob) string {
+	parallelRuns := ""
+	if j.RunsTotal > 1 {
+		parallelRuns = fmt.Sprintf("  %d/%d", j.RunsDone, j.RunsTotal)
+	}
 	return fmt.Sprintf("    %s  %s %s  %s",
 		pad(m.link(j.Name, j.URL), runWatchJobNameCol),
 		m.palette.StatusText(j.Symbol, j.Symbol),
-		m.statusWord(j.Symbol, j.Status),
+		m.statusWord(j.Symbol, j.Status)+parallelRuns,
 		m.timing(j.StartedAt, j.EndedAt))
 }
 

@@ -35,6 +35,7 @@ import (
 	"github.com/MakeNowJust/heredoc"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 
 	clierrors "github.com/CircleCI-Public/circleci-cli/clikit/errors"
 	"github.com/CircleCI-Public/circleci-cli/clikit/iostream"
@@ -438,6 +439,8 @@ func watchState(state runGetOutput, appURL string) ui.RunWatchState {
 				StartedAt: j.startedAt,
 				EndedAt:   j.endedAt,
 				Failed:    j.Outcome == "failed",
+				RunsDone:  j.runsDone,
+				RunsTotal: j.runsTotal,
 			}
 			if appURL != "" {
 				job.URL = cmdutil.JobURL(appURL, wf.ID, j.ID)
@@ -491,7 +494,43 @@ func fetchWatchState(ctx context.Context, client *apiclient.Client, runID uuid.U
 		}
 		wfJobs[i] = jobs
 	}
-	return buildOutput(r, workflows, wfJobs), nil
+	out := buildOutput(r, workflows, wfJobs)
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(maxWorkflowFetches)
+	for i := range out.Workflows {
+		for j := range out.Workflows[i].Jobs {
+			job := &out.Workflows[i].Jobs[j]
+			if apiclient.PhaseNotStarted(job.Phase) {
+				continue
+			}
+			if job.Phase == apiclient.PhaseEnded {
+				if job.runsTotal == 0 {
+					job.runsTotal = 1
+				}
+				job.runsDone = job.runsTotal
+				continue
+			}
+			g.Go(func() error {
+				detail, err := client.GetJobV3(ctx, job.ID)
+				if err != nil {
+					// Execution counts are supplementary; an unavailable detail
+					// endpoint must not stop the run watch.
+					return nil
+				}
+				job.runsTotal = len(detail.Executions)
+				for _, execution := range detail.Executions {
+					if len(execution.Steps) > 0 && execution.Steps[len(execution.Steps)-1].StoppedAt != nil {
+						job.runsDone++
+					}
+				}
+				return nil
+			})
+		}
+	}
+	if err := g.Wait(); err != nil {
+		return runGetOutput{}, err
+	}
+	return out, nil
 }
 
 // runEnded reports whether the run itself has finished, and is the only thing

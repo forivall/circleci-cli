@@ -220,6 +220,8 @@ type jobOutput struct {
 
 	startedAt *time.Time
 	endedAt   *time.Time
+	runsDone  int
+	runsTotal int
 }
 
 func runGet(ctx context.Context, client *apiclient.Client, args []string, projectSlug, branch string, jsonOut, mine, noInteractive, failureReport bool) error {
