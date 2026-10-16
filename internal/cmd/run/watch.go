@@ -361,6 +361,7 @@ func watchUntilDone(ctx context.Context, client *apiclient.Client, runID uuid.UU
 	var prevFingerprint string
 	notedPending := false
 	pollInterval := ui.RunWatchPollInterval
+	watchStarted := time.Now()
 
 	for {
 		raw, err := fetchWatchState(ctx, client, runID)
@@ -401,8 +402,8 @@ func watchUntilDone(ctx context.Context, client *apiclient.Client, runID uuid.UU
 		if err := sleepOrCancel(ctx, pollInterval); err != nil {
 			return watchInterrupted()
 		}
-		if pollInterval < ui.RunWatchMaxPollInterval {
-			pollInterval += ui.RunWatchPollInterval
+		if time.Since(watchStarted) >= ui.RunWatchBackoffDelay && pollInterval < ui.RunWatchMaxPollInterval {
+			pollInterval = min(pollInterval+ui.RunWatchPollBackoff, ui.RunWatchMaxPollInterval)
 		}
 	}
 }

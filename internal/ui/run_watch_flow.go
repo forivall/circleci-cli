@@ -40,14 +40,14 @@ import (
 	"github.com/CircleCI-Public/circleci-cli/clikit/ui/theme"
 )
 
-// Poll cadence for the watch flow. The first poll follows RunWatchPollInterval
-// and each subsequent one waits a step longer, up to RunWatchMaxPollInterval —
-// a run that has been going for twenty minutes rarely needs second-by-second
-// attention, and the API does not need the traffic. The clock redraws at least
+// Poll cadence for the watch flow. The wait starts at five seconds and backs
+// off by one second per poll, up to thirty seconds. The clock redraws at least
 // once a second regardless, so the display never looks frozen between polls.
 const (
 	RunWatchPollInterval    = 5 * time.Second
+	RunWatchPollBackoff     = 1 * time.Second
 	RunWatchMaxPollInterval = 30 * time.Second
+	RunWatchBackoffDelay    = 1 * time.Minute
 
 	// runWatchClockTick is the longest a clock tick ever waits. A tick usually
 	// comes sooner: it is aimed at whichever figure on screen changes next (see
@@ -298,14 +298,13 @@ type RunWatchFlowModel struct {
 	complete map[string]bool
 
 	// The poll schedule. wait is the interval the countdown on screen is measured
-	// against and nextWait the one after it — the backoff is applied when a wait
-	// is scheduled, not while it runs, so the first wait is the base interval and
-	// the meter's span always matches the figure beside it. nextPoll is when the
+	// against and nextWait the one after it. nextPoll is when the
 	// wait expires, and is zero while a fetch is in flight.
 	wait     time.Duration
 	nextWait time.Duration
 	nextPoll time.Time
 	polling  bool
+	pollTime time.Time
 
 	// clockGen identifies the live clock chain. Arming a clock supersedes the
 	// outstanding one, and a tick that arrives from an older generation is
@@ -441,9 +440,10 @@ func (m RunWatchFlowModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.done || m.polling {
 			return m, nil
 		}
-		// A manual refresh restarts the backoff: the user is watching closely
+		// A manual refresh resets the scheduled wait: the user is watching closely
 		// again, so go back to the tightest cadence.
 		m.nextWait = m.opts.PollInterval
+		m.pollTime = time.Now()
 		next, fetch := m.beginPoll()
 		next, clock := next.armClock()
 		return next, tea.Batch(fetch, clock)
@@ -514,7 +514,13 @@ func (m RunWatchFlowModel) onState(msg runWatchStateMsg) (tea.Model, tea.Cmd) {
 
 	m.wait = m.nextWait
 	m.nextPoll = time.Now().Add(m.wait)
-	m.nextWait = min(m.nextWait+m.opts.PollInterval, m.opts.MaxPollInterval)
+	pollStart := m.start
+	if !m.pollTime.IsZero() {
+		pollStart = m.pollTime
+	}
+	if time.Since(pollStart) >= RunWatchBackoffDelay {
+		m.nextWait = min(m.nextWait+RunWatchPollBackoff, m.opts.MaxPollInterval)
+	}
 	// Re-arm rather than leave it to the outstanding tick, which was aimed at a
 	// schedule that predates this wait: a wait shorter than the time left on that
 	// tick would otherwise not be noticed until it landed.
