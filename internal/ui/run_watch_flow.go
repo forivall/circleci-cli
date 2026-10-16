@@ -107,10 +107,11 @@ type RunWatchJob struct {
 	Steps     []RunWatchStep
 }
 
-// RunWatchStep is a currently running step in one execution of a job.
+// RunWatchStep is the current or most recently named step in one job execution.
 type RunWatchStep struct {
 	Execution int
 	Name      string
+	Symbol    string
 }
 
 // RunWatchWorkflow is one workflow row and the job rows nested under it. URL and
@@ -553,7 +554,7 @@ func (m RunWatchFlowModel) ViewTable() []string {
 		for _, j := range wf.Jobs {
 			rows = append(rows, m.jobRow(j))
 			for _, step := range j.Steps {
-				rows = append(rows, m.runningStepRow(step, j.RunsTotal > 1))
+				rows = append(rows, m.currentStepRow(step, j.RunsTotal > 1))
 			}
 		}
 	}
@@ -728,12 +729,16 @@ func (m RunWatchFlowModel) jobRow(j RunWatchJob) string {
 		m.timing(j.StartedAt, j.EndedAt))
 }
 
-func (m RunWatchFlowModel) runningStepRow(step RunWatchStep, parallel bool) string {
+func (m RunWatchFlowModel) currentStepRow(step RunWatchStep, parallel bool) string {
 	label := step.Name
 	if parallel {
 		label = fmt.Sprintf("%d %s", step.Execution, label)
 	}
-	return fmt.Sprintf("      %s %s", m.muted("‣"), label)
+	symbol := step.Symbol
+	if symbol == "" {
+		symbol = "●"
+	}
+	return fmt.Sprintf("      %s %s", m.palette.StatusText(symbol, symbol), label)
 }
 
 // link renders a row's name as a clickable OSC-8 hyperlink to its page in the

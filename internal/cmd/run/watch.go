@@ -523,13 +523,20 @@ func fetchWatchState(ctx context.Context, client *apiclient.Client, runID uuid.U
 				}
 				job.runsTotal = len(detail.Executions)
 				for _, execution := range detail.Executions {
-					for _, step := range execution.Steps {
-						if step.Phase == apiclient.PhaseStarted && step.StoppedAt == nil {
-							job.steps = append(job.steps, ui.RunWatchStep{
-								Execution: execution.Index,
-								Name:      step.Name,
-							})
+					var runningStep, lastNamedStep *apiclient.JobV3Step
+					for i := range execution.Steps {
+						step := &execution.Steps[i]
+						if step.Name != "" {
+							lastNamedStep = step
 						}
+						if step.Phase == apiclient.PhaseStarted && step.StoppedAt == nil {
+							runningStep = step
+						}
+					}
+					if runningStep != nil {
+						job.steps = appendWatchStep(job.steps, execution.Index, runningStep)
+					} else if lastNamedStep != nil {
+						job.steps = appendWatchStep(job.steps, execution.Index, lastNamedStep)
 					}
 					if len(execution.Steps) > 0 && execution.Steps[len(execution.Steps)-1].StoppedAt != nil {
 						job.runsDone++
@@ -543,6 +550,14 @@ func fetchWatchState(ctx context.Context, client *apiclient.Client, runID uuid.U
 		return runGetOutput{}, err
 	}
 	return out, nil
+}
+
+func appendWatchStep(steps []ui.RunWatchStep, execution int, step *apiclient.JobV3Step) []ui.RunWatchStep {
+	return append(steps, ui.RunWatchStep{
+		Execution: execution,
+		Name:      step.Name,
+		Symbol:    apiclient.PhaseOutcomeSymbol(step.Phase, step.Outcome, ""),
+	})
 }
 
 // runEnded reports whether the run itself has finished, and is the only thing
@@ -605,7 +620,7 @@ func watchFingerprint(state ui.RunWatchState) string {
 			b.WriteString(j.Status)
 			b.WriteByte(';')
 			for _, step := range j.Steps {
-				b.WriteString(fmt.Sprintf("%d:%s;", step.Execution, step.Name))
+				b.WriteString(fmt.Sprintf("%d:%s:%s;", step.Execution, step.Symbol, step.Name))
 			}
 		}
 	}
@@ -622,7 +637,7 @@ func printWatchLine(ctx context.Context, state ui.RunWatchState, elapsed time.Du
 				if job.RunsTotal > 1 {
 					label = fmt.Sprintf("%d: %s", step.Execution, label)
 				}
-				parts = append(parts, fmt.Sprintf("%s step=%s", job.Name, label))
+				parts = append(parts, fmt.Sprintf("%s step=%s %s", job.Name, step.Symbol, label))
 			}
 		}
 	}
