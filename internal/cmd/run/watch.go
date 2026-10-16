@@ -533,12 +533,13 @@ func fetchWatchState(ctx context.Context, client *apiclient.Client, runID uuid.U
 							runningStep = step
 						}
 					}
+					done := len(execution.Steps) > 0 && execution.Steps[len(execution.Steps)-1].StoppedAt != nil
 					if runningStep != nil {
-						job.steps = appendWatchStep(job.steps, execution.Index, runningStep)
+						job.steps = appendWatchStep(job.steps, execution.Index, runningStep, done)
 					} else if lastNamedStep != nil {
-						job.steps = appendWatchStep(job.steps, execution.Index, lastNamedStep)
+						job.steps = appendWatchStep(job.steps, execution.Index, lastNamedStep, done)
 					}
-					if len(execution.Steps) > 0 && execution.Steps[len(execution.Steps)-1].StoppedAt != nil {
+					if done {
 						job.runsDone++
 					}
 				}
@@ -555,6 +556,7 @@ func fetchWatchState(ctx context.Context, client *apiclient.Client, runID uuid.U
 func appendWatchStep(steps []ui.RunWatchStep, execution int, step *apiclient.JobV3Step) []ui.RunWatchStep {
 	return append(steps, ui.RunWatchStep{
 		Execution: execution,
+		Done:      done,
 		Name:      step.Name,
 		Symbol:    apiclient.PhaseOutcomeSymbol(step.Phase, step.Outcome, ""),
 	})

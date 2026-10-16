@@ -110,6 +110,7 @@ type RunWatchJob struct {
 // RunWatchStep is the current or most recently named step in one job execution.
 type RunWatchStep struct {
 	Execution int
+	Done      bool
 	Name      string
 	Symbol    string
 }
@@ -280,6 +281,11 @@ type RunWatchFlowModel struct {
 	state  RunWatchState
 	loaded bool
 
+	// complete remembers terminal parallel rows already shown. A
+	// complete execution gets one refresh in the table, then disappears while
+	// the remaining executions continue.
+	complete map[string]bool
+
 	// The poll schedule. wait is the interval the countdown on screen is measured
 	// against and nextWait the one after it — the backoff is applied when a wait
 	// is scheduled, not while it runs, so the first wait is the base interval and
@@ -323,6 +329,7 @@ func NewRunWatchFlow(ctx context.Context, opts RunWatchFlowOptions) RunWatchFlow
 		start:    time.Now(),
 		spin:     spin,
 		nextWait: opts.PollInterval,
+		complete: make(map[string]bool),
 		// Init's first act is to fetch, so the model starts mid-poll.
 		polling: true,
 	}
@@ -455,6 +462,7 @@ func (m RunWatchFlowModel) onState(msg runWatchStateMsg) (tea.Model, tea.Cmd) {
 		return m.quit()
 	}
 
+	msg.state = m.expireCompletedExecutions(msg.state)
 	m.state = msg.state
 	m.loaded = true
 	m.polling = false
@@ -479,6 +487,35 @@ func (m RunWatchFlowModel) onState(msg runWatchStateMsg) (tea.Model, tea.Cmd) {
 	// tick would otherwise not be noticed until it landed.
 	next, clock := m.armClock()
 	return next, clock
+}
+
+func (m RunWatchFlowModel) expireCompletedExecutions(state RunWatchState) RunWatchState {
+	if m.complete == nil {
+		m.complete = make(map[string]bool)
+	}
+	for wi := range state.Workflows {
+		for ji := range state.Workflows[wi].Jobs {
+			job := &state.Workflows[wi].Jobs[ji]
+			steps := job.Steps[:0]
+			for _, step := range job.Steps {
+				if !step.Done || job.RunsTotal <= 1 {
+					steps = append(steps, step)
+					continue
+				}
+				key := fmt.Sprintf("%s/%d", job.ID, step.Execution)
+				if m.complete[key] {
+					continue
+				}
+				m.complete[key] = true
+				if !m.loaded {
+					continue
+				}
+				steps = append(steps, step)
+			}
+			job.Steps = steps
+		}
+	}
+	return state
 }
 
 // quit stamps the elapsed time onto the result and ends the program. The view
