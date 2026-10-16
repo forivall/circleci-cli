@@ -453,7 +453,11 @@ func watchState(state runGetOutput, appURL string) ui.RunWatchState {
 				Steps:     make([]ui.RunWatchStep, 0, len(j.steps)),
 			}
 			for _, step := range j.steps {
-				job.Steps = append(job.Steps, step)
+				stepRow := step
+				if appURL != "" {
+					stepRow.URL = fmt.Sprintf("%s/parallel-runs/%d/steps/%d-%d", job.URL, step.Execution, step.Execution, step.StepNum)
+				}
+				job.Steps = append(job.Steps, stepRow)
 			}
 			if appURL != "" {
 				job.URL = cmdutil.JobURL(appURL, wf.ID, j.ID)
@@ -533,20 +537,23 @@ func fetchWatchState(ctx context.Context, client *apiclient.Client, runID uuid.U
 				job.runsTotal = len(detail.Executions)
 				for _, execution := range detail.Executions {
 					var runningStep, lastNamedStep *apiclient.JobV3Step
+					var runningNumber, lastNamedNumber int
 					for i := range execution.Steps {
 						step := &execution.Steps[i]
 						if step.Name != "" {
 							lastNamedStep = step
+							lastNamedNumber = i + 1
 						}
 						if step.Phase == apiclient.PhaseStarted && step.StoppedAt == nil {
 							runningStep = step
+							runningNumber = i + 1
 						}
 					}
 					done := len(execution.Steps) > 0 && execution.Steps[len(execution.Steps)-1].StoppedAt != nil
 					if runningStep != nil {
-						job.steps = appendWatchStep(job.steps, execution.Index, runningStep, done)
+						job.steps = appendWatchStep(job.steps, execution.Index, runningNumber, runningStep, done)
 					} else if lastNamedStep != nil {
-						job.steps = appendWatchStep(job.steps, execution.Index, lastNamedStep, done)
+						job.steps = appendWatchStep(job.steps, execution.Index, lastNamedNumber, lastNamedStep, done)
 					}
 					if done {
 						job.runsDone++
@@ -562,12 +569,22 @@ func fetchWatchState(ctx context.Context, client *apiclient.Client, runID uuid.U
 	return out, nil
 }
 
-func appendWatchStep(steps []ui.RunWatchStep, execution int, step *apiclient.JobV3Step) []ui.RunWatchStep {
+func appendWatchStep(steps []ui.RunWatchStep, execution, number int, step *apiclient.JobV3Step, done bool) []ui.RunWatchStep {
+	var startedAt *time.Time
+	if !step.StartedAt.IsZero() {
+		startedAt = &step.StartedAt
+	}
 	return append(steps, ui.RunWatchStep{
 		Execution: execution,
 		Done:      done,
+		Number:    number,
+		StepNum:   step.Num,
 		Name:      step.Name,
+		Command:   step.Command,
 		Symbol:    apiclient.PhaseOutcomeSymbol(step.Phase, step.Outcome, ""),
+		Status:    apiclient.PhaseOutcomeText(step.Phase, step.Outcome, ""),
+		StartedAt: startedAt,
+		EndedAt:   step.StoppedAt,
 	})
 }
 

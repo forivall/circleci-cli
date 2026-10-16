@@ -62,6 +62,7 @@ const (
 const (
 	runWatchWorkflowNameCol = 30
 	runWatchJobNameCol      = 28
+	runWatchStepNameCol     = 26
 	runWatchStatusCol       = 10
 )
 
@@ -111,8 +112,15 @@ type RunWatchJob struct {
 type RunWatchStep struct {
 	Execution int
 	Done      bool
+	Number    int
+	StepNum   int
 	Name      string
+	Command   string
 	Symbol    string
+	Status    string
+	URL       string
+	StartedAt *time.Time
+	EndedAt   *time.Time
 }
 
 // RunWatchWorkflow is one workflow row and the job rows nested under it. URL and
@@ -793,7 +801,7 @@ func (m RunWatchFlowModel) jobRow(j RunWatchJob) string {
 }
 
 func (m RunWatchFlowModel) currentStepRow(step RunWatchStep, parallel bool) string {
-	label := step.Name
+	label := fmt.Sprintf("%s %s", fmt.Sprintf("#%d", step.StepNum), step.Name)
 	if parallel {
 		execution := m.palette.Accent.Render(fmt.Sprintf("%d", step.Execution))
 		label = fmt.Sprintf("%s %s", execution, label)
@@ -802,7 +810,19 @@ func (m RunWatchFlowModel) currentStepRow(step RunWatchStep, parallel bool) stri
 	if symbol == "" {
 		symbol = "●"
 	}
-	return fmt.Sprintf("      %s %s", m.palette.StatusText(symbol, symbol), label)
+	stepNumber := ""
+	if step.Number > 0 {
+		stepNumber = fmt.Sprintf(" %d", step.Number)
+	}
+	row := fmt.Sprintf("      %s  %s %s  %s",
+		pad(m.link(label, step.URL), runWatchStepNameCol),
+		m.palette.StatusText(symbol, symbol),
+		m.statusWord(symbol, step.Status)+stepNumber,
+		m.timing(step.StartedAt, step.EndedAt))
+	if step.Command != "" {
+		row += "\n        " + step.Command
+	}
+	return row
 }
 
 // link renders a row's name as a clickable OSC-8 hyperlink to its page in the
