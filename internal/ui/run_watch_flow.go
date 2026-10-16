@@ -457,6 +457,17 @@ func (m RunWatchFlowModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// IsFailedStepStatus reports whether a terminal step status represents a
+// failure, including failures reported as timeouts or infrastructure errors.
+func IsFailedStepStatus(status string) bool {
+	switch status {
+	case "failed", "timedout", "errored", "infrastructure_fail":
+		return true
+	default:
+		return false
+	}
+}
+
 // beginPoll marks a fetch as in flight — the countdown has nothing left to count
 // down to — and returns the command that runs it.
 func (m RunWatchFlowModel) beginPoll() (RunWatchFlowModel, tea.Cmd) {
@@ -815,8 +826,11 @@ func (m RunWatchFlowModel) currentStepRow(step RunWatchStep, parallel bool) stri
 		m.palette.StatusText(symbol, symbol),
 		m.statusWord(symbol, step.Status),
 		m.timing(step.StartedAt, step.EndedAt))
-	if step.Command != "" {
-		row += "\n        " + step.Command
+	if step.Command != "" && IsFailedStepStatus(step.Status) {
+		command := strings.TrimSpace(step.Command)
+		command = strings.ReplaceAll(command, "\r\n", "\n")
+		command = strings.ReplaceAll(command, "\n", "\n        ")
+		row += "\n        " + m.palette.Muted.Render(command)
 	}
 	return row
 }
