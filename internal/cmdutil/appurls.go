@@ -75,6 +75,16 @@ func JobURL(appURL string, workflowID, jobID uuid.UUID) string {
 	return fmt.Sprintf("%s/workflow/%s/job/%s", appURL, workflowID, jobID)
 }
 
+func JobNumberURL(appURL string, workflowID uuid.UUID, jobNumber int64) string {
+	return fmt.Sprintf("%s/workflow/%s/job/%d", appURL, workflowID, jobNumber)
+}
+
+// StepURL returns the CircleCI page URL for a step in a parallel-run execution.
+func StepURL(appURL string, workflowID uuid.UUID, jobNumber int64, execution, stepNum int) string {
+	return fmt.Sprintf("%s/parallel-runs/%d/steps/%d-%d",
+		JobNumberURL(appURL, workflowID, jobNumber), execution, execution, stepNum)
+}
+
 // ProjectURL returns the CircleCI project page URL for the given project slug.
 func ProjectURL(appURL, slug string) (string, error) {
 	parts := strings.SplitN(slug, "/", 3)

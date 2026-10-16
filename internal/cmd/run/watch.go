@@ -456,12 +456,15 @@ func watchState(state runGetOutput, appURL string) ui.RunWatchState {
 			for _, step := range j.steps {
 				stepRow := step
 				if appURL != "" {
-					stepRow.URL = fmt.Sprintf("%s/parallel-runs/%d/steps/%d-%d", job.URL, step.Execution, step.Execution, step.StepNum)
+					stepRow.URL = cmdutil.StepURL(appURL, wf.ID, j.JobNumber, step.Execution, step.StepNum)
 				}
 				job.Steps = append(job.Steps, stepRow)
 			}
 			if appURL != "" {
 				job.URL = cmdutil.JobURL(appURL, wf.ID, j.ID)
+				if j.JobNumber > 0 {
+					job.URL = cmdutil.JobNumberURL(appURL, wf.ID, j.JobNumber)
+				}
 			}
 			row.Jobs = append(row.Jobs, job)
 		}

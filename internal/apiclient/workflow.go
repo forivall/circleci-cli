@@ -172,6 +172,7 @@ func (c *Client) CancelWorkflow(ctx context.Context, id uuid.UUID) error {
 
 type workflowJobAttributesWire struct {
 	Name           string     `json:"name"`
+	JobNumber      int64      `json:"number"`
 	Phase          string     `json:"phase"`
 	Type           string     `json:"type,omitempty"`
 	Outcome        string     `json:"outcome,omitempty"`
@@ -198,6 +199,7 @@ type workflowJobWire struct {
 // WorkflowJobV3 is a job belonging to a workflow from the V3 API.
 type WorkflowJobV3 struct {
 	ID             uuid.UUID  `json:"id"`
+	JobNumber      int64      `json:"job_number"`
 	Name           string     `json:"name"`
 	Phase          string     `json:"phase"`
 	Outcome        string     `json:"outcome,omitempty"`
@@ -217,6 +219,7 @@ func (w workflowJobWire) toDomain() WorkflowJobV3 {
 	a := w.Attributes
 	return WorkflowJobV3{
 		ID:             w.ID,
+		JobNumber:      a.JobNumber,
 		Name:           a.Name,
 		Phase:          effectiveJobPhase(a.Phase, a.StartedAt),
 		Outcome:        a.Outcome,

@@ -212,6 +212,7 @@ type workflowOutput struct {
 
 type jobOutput struct {
 	ID             uuid.UUID `json:"id"`
+	JobNumber      int64     `json:"job_number"`
 	Name           string    `json:"name"`
 	Phase          string    `json:"phase"`
 	Outcome        string    `json:"outcome,omitempty"`
@@ -913,6 +914,7 @@ func buildOutput(r *apiclient.RunV3, workflows []apiclient.WorkflowV3, wfJobs []
 		for _, j := range wfJobs[i] {
 			jobs = append(jobs, jobOutput{
 				ID:             j.ID,
+				JobNumber:      j.JobNumber,
 				Name:           j.Name,
 				Phase:          j.Phase,
 				Outcome:        j.Outcome,
