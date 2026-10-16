@@ -810,14 +810,10 @@ func (m RunWatchFlowModel) currentStepRow(step RunWatchStep, parallel bool) stri
 	if symbol == "" {
 		symbol = "●"
 	}
-	stepNumber := ""
-	if step.Number > 0 {
-		stepNumber = fmt.Sprintf(" %d", step.Number)
-	}
 	row := fmt.Sprintf("      %s  %s %s  %s",
 		pad(m.link(label, step.URL), runWatchStepNameCol),
 		m.palette.StatusText(symbol, symbol),
-		m.statusWord(symbol, step.Status)+stepNumber,
+		m.statusWord(symbol, step.Status),
 		m.timing(step.StartedAt, step.EndedAt))
 	if step.Command != "" {
 		row += "\n        " + step.Command
