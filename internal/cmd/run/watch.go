@@ -446,6 +446,7 @@ func watchState(state runGetOutput, appURL string) ui.RunWatchState {
 				Name:      j.Name,
 				Symbol:    apiclient.PhaseOutcomeSymbol(j.Phase, j.Outcome, j.CurrentOutcome),
 				Status:    apiclient.PhaseOutcomeText(j.Phase, j.Outcome, j.CurrentOutcome),
+				Type:      j.Type,
 				StartedAt: j.startedAt,
 				EndedAt:   j.endedAt,
 				Failed:    j.Outcome == "failed",

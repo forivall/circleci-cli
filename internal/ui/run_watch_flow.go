@@ -100,6 +100,7 @@ type RunWatchJob struct {
 	URL       string
 	Symbol    string
 	Status    string
+	Type      string
 	StartedAt *time.Time
 	EndedAt   *time.Time
 	Failed    bool
@@ -625,16 +626,32 @@ func (m RunWatchFlowModel) View() tea.View {
 
 func (m RunWatchFlowModel) ViewTable() []string {
 	var rows []string
+	showJobType := hasMultipleJobTypes(m.state.Workflows)
 	for _, wf := range m.state.Workflows {
 		rows = append(rows, m.workflowRow(wf))
 		for _, j := range wf.Jobs {
-			rows = append(rows, m.jobRow(j))
+			rows = append(rows, m.jobRow(j, showJobType))
 			for _, step := range j.Steps {
 				rows = append(rows, m.currentStepRow(step, j.RunsTotal > 1))
 			}
 		}
 	}
 	return rows
+}
+
+func hasMultipleJobTypes(workflows []RunWatchWorkflow) bool {
+	types := make(map[string]struct{})
+	for _, wf := range workflows {
+		for _, job := range wf.Jobs {
+			if job.Type != "" {
+				types[job.Type] = struct{}{}
+				if len(types) > 1 {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (m RunWatchFlowModel) buildView() tea.View {
@@ -805,7 +822,7 @@ func (m RunWatchFlowModel) workflowRow(wf RunWatchWorkflow) string {
 
 // jobRow renders one job, indented under its workflow, with the same link and
 // timing columns as its workflow's row.
-func (m RunWatchFlowModel) jobRow(j RunWatchJob) string {
+func (m RunWatchFlowModel) jobRow(j RunWatchJob, showType bool) string {
 	parallelRuns := ""
 	if j.RunsTotal > 1 {
 		parallelRuns = fmt.Sprintf(" %d/%d", j.RunsDone, j.RunsTotal)
@@ -814,11 +831,14 @@ func (m RunWatchFlowModel) jobRow(j RunWatchJob) string {
 	if width := ansi.StringWidth(statusText); width <= runWatchStatusCol {
 		statusText += strings.Repeat(" ", runWatchStatusCol-width)
 	}
-	return fmt.Sprintf("    %s  %s %s %s",
+	row := fmt.Sprintf("    %s  %s %s",
 		pad(m.link(j.Name, j.URL), runWatchJobNameCol),
 		m.palette.StatusText(j.Symbol, j.Symbol),
-		statusText,
-		m.timing(j.StartedAt, j.EndedAt))
+		statusText)
+	if showType {
+		row += "  " + j.Type
+	}
+	return row + "  " + m.timing(j.StartedAt, j.EndedAt)
 }
 
 func (m RunWatchFlowModel) currentStepRow(step RunWatchStep, parallel bool) string {
