@@ -795,7 +795,8 @@ func (m RunWatchFlowModel) jobRow(j RunWatchJob) string {
 func (m RunWatchFlowModel) currentStepRow(step RunWatchStep, parallel bool) string {
 	label := step.Name
 	if parallel {
-		label = fmt.Sprintf("%d %s", step.Execution, label)
+		execution := m.palette.Accent.Render(fmt.Sprintf("%d", step.Execution))
+		label = fmt.Sprintf("%s %s", execution, label)
 	}
 	symbol := step.Symbol
 	if symbol == "" {
