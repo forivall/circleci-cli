@@ -63,7 +63,7 @@ const (
 	runWatchWorkflowNameCol = 30
 	runWatchJobNameCol      = 28
 	runWatchStepNameCol     = 26
-	runWatchStatusCol       = 10
+	runWatchStatusCol       = 12
 )
 
 // The footer's poll meter: how many cells it is drawn in, and the filled and
@@ -796,7 +796,7 @@ func (m RunWatchFlowModel) pollMeter(remaining time.Duration) string {
 // run and the clock window it ran in — live for a workflow still going, since
 // the flow redraws every second.
 func (m RunWatchFlowModel) workflowRow(wf RunWatchWorkflow) string {
-	return fmt.Sprintf("  %s  %s %s  %s",
+	return fmt.Sprintf("  %s  %s %s %s",
 		pad(m.link(wf.Name, wf.URL), runWatchWorkflowNameCol),
 		m.palette.StatusText(wf.Symbol, wf.Symbol),
 		m.statusWord(wf.Symbol, wf.Status),
@@ -808,12 +808,16 @@ func (m RunWatchFlowModel) workflowRow(wf RunWatchWorkflow) string {
 func (m RunWatchFlowModel) jobRow(j RunWatchJob) string {
 	parallelRuns := ""
 	if j.RunsTotal > 1 {
-		parallelRuns = fmt.Sprintf("  %d/%d", j.RunsDone, j.RunsTotal)
+		parallelRuns = fmt.Sprintf(" %d/%d", j.RunsDone, j.RunsTotal)
 	}
-	return fmt.Sprintf("    %s  %s %s  %s",
+	statusText := m.palette.StatusText(j.Symbol, j.Status)+parallelRuns
+	if width := ansi.StringWidth(statusText); width <= runWatchStatusCol {
+		statusText += strings.Repeat(" ", runWatchStatusCol-width)
+	}
+	return fmt.Sprintf("    %s  %s %s %s",
 		pad(m.link(j.Name, j.URL), runWatchJobNameCol),
 		m.palette.StatusText(j.Symbol, j.Symbol),
-		m.statusWord(j.Symbol, j.Status)+parallelRuns,
+		statusText,
 		m.timing(j.StartedAt, j.EndedAt))
 }
 
@@ -827,7 +831,7 @@ func (m RunWatchFlowModel) currentStepRow(step RunWatchStep, parallel bool) stri
 	if symbol == "" {
 		symbol = "●"
 	}
-	row := fmt.Sprintf("      %s  %s %s  %s",
+	row := fmt.Sprintf("      %s  %s %s %s",
 		pad(m.link(label, step.URL), runWatchStepNameCol),
 		m.palette.StatusText(symbol, symbol),
 		m.statusWord(symbol, step.Status),
