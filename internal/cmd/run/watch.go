@@ -441,6 +441,10 @@ func watchState(state runGetOutput, appURL string) ui.RunWatchState {
 				Failed:    j.Outcome == "failed",
 				RunsDone:  j.runsDone,
 				RunsTotal: j.runsTotal,
+				Steps:     make([]ui.RunWatchStep, 0, len(j.steps)),
+			}
+			for _, step := range j.steps {
+				job.Steps = append(job.Steps, step)
 			}
 			if appURL != "" {
 				job.URL = cmdutil.JobURL(appURL, wf.ID, j.ID)
@@ -519,6 +523,14 @@ func fetchWatchState(ctx context.Context, client *apiclient.Client, runID uuid.U
 				}
 				job.runsTotal = len(detail.Executions)
 				for _, execution := range detail.Executions {
+					for _, step := range execution.Steps {
+						if step.Phase == apiclient.PhaseStarted && step.StoppedAt == nil {
+							job.steps = append(job.steps, ui.RunWatchStep{
+								Execution: execution.Index,
+								Name:      step.Name,
+							})
+						}
+					}
 					if len(execution.Steps) > 0 && execution.Steps[len(execution.Steps)-1].StoppedAt != nil {
 						job.runsDone++
 					}
@@ -592,6 +604,9 @@ func watchFingerprint(state ui.RunWatchState) string {
 			b.WriteByte('=')
 			b.WriteString(j.Status)
 			b.WriteByte(';')
+			for _, step := range j.Steps {
+				b.WriteString(fmt.Sprintf("%d:%s;", step.Execution, step.Name))
+			}
 		}
 	}
 	return b.String()
@@ -601,6 +616,15 @@ func printWatchLine(ctx context.Context, state ui.RunWatchState, elapsed time.Du
 	parts := make([]string, 0, len(state.Workflows))
 	for _, wf := range state.Workflows {
 		parts = append(parts, fmt.Sprintf("%s=%s", wf.Name, wf.Status))
+		for _, job := range wf.Jobs {
+			for _, step := range job.Steps {
+				label := step.Name
+				if job.RunsTotal > 1 {
+					label = fmt.Sprintf("%d: %s", step.Execution, label)
+				}
+				parts = append(parts, fmt.Sprintf("%s step=%s", job.Name, label))
+			}
+		}
 	}
 	iostream.ErrPrintf(ctx, "[%s]  %s\n", ui.FormatElapsed(elapsed), strings.Join(parts, "  "))
 }

@@ -222,6 +222,7 @@ type jobOutput struct {
 	endedAt   *time.Time
 	runsDone  int
 	runsTotal int
+	steps     []ui.RunWatchStep
 }
 
 func runGet(ctx context.Context, client *apiclient.Client, args []string, projectSlug, branch string, jsonOut, mine, noInteractive, failureReport bool) error {
