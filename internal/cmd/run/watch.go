@@ -65,6 +65,7 @@ func newWatchCmd() *cobra.Command {
 		sha         string
 		timeout     time.Duration
 		failFast    bool
+		noFail      bool
 	)
 
 	cmd := &cobra.Command{
@@ -79,13 +80,11 @@ func newWatchCmd() *cobra.Command {
 			`, "`"),
 		},
 		Long: heredoc.Doc(`
-			Monitor a CircleCI run and block until it reaches a terminal state. Without
-			arguments, watches the latest run for the current branch. A terminal gets a
-			live table of workflows and jobs; piped or in CI, each change prints a line.
+			Monitor a CircleCI run and block until it finishes. By default, watch the run
+			for the current branch. When running in a TTY, displays a live table of
+			workflows and jobs. When piped or in CI, prints a line on change.
 
-			Exit code reflects the result: 0 succeeded, 1 failed, 6 cancelled, 7 the run's
-			config was rejected (a dynamic-config continuation included), 8 timed out.
-			With --sha, polls up to 2 minutes for the run to appear — useful after a push.
+			Exit codes: 0=success, 1=failed, 6=cancelled, 7=config error, 8=timed out.
 		`),
 		Example: heredoc.Doc(`
 			# Watch the latest run on the current branch
@@ -110,7 +109,7 @@ func newWatchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runWatch(ctx, client, args, projectSlug, branch, sha, timeout, failFast)
+			return runWatch(ctx, client, args, projectSlug, branch, sha, timeout, failFast, noFail)
 		},
 	}
 
@@ -119,11 +118,12 @@ func newWatchCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sha, "sha", "", "Watch run for this commit SHA; polls up to 2m if not yet created")
 	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Minute, "Maximum time to wait for run completion")
 	cmd.Flags().BoolVar(&failFast, "failfast", false, "Exit as soon as any job fails, without waiting for the rest of the run")
+	cmd.Flags().BoolVar(&noFail, "nofail", false, "Keep the interactive watch open after failure to rerun failed jobs")
 
 	return cmd
 }
 
-func runWatch(ctx context.Context, client *apiclient.Client, args []string, projectSlug, branch, sha string, timeout time.Duration, failFast bool) error {
+func runWatch(ctx context.Context, client *apiclient.Client, args []string, projectSlug, branch, sha string, timeout time.Duration, failFast, noFail bool) error {
 	var (
 		id  uuid.UUID
 		err error
@@ -206,7 +206,7 @@ func runWatch(ctx context.Context, client *apiclient.Client, args []string, proj
 	// header. Everywhere else — piped, redirected, or CI — the run is announced on
 	// one line and progress is reported a line at a time.
 	if iostream.IsInteractive(ctx) {
-		return watchInteractive(ctx, client, r.ID, displayBranch, timeout, failFast)
+		return watchInteractive(ctx, client, r.ID, displayBranch, timeout, failFast, noFail)
 	}
 
 	iostream.ErrPrintf(ctx, "Watching run %s (%s)\n\n", r.ID, displayBranch)
@@ -277,7 +277,7 @@ func waitForRunBySHA(ctx context.Context, client *apiclient.Client, projectSlug,
 // outcome; the summary line and exit code are decided here, by the same
 // functions the non-interactive path uses, so both agree on what a failed run
 // looks like.
-func watchInteractive(ctx context.Context, client *apiclient.Client, runID uuid.UUID, branch string, timeout time.Duration, failFast bool) error {
+func watchInteractive(ctx context.Context, client *apiclient.Client, runID uuid.UUID, branch string, timeout time.Duration, failFast, noFail bool) error {
 	appURL, err := cmdutil.AppURL(ctx)
 	if failFast && err != nil {
 		return err
@@ -290,6 +290,7 @@ func watchInteractive(ctx context.Context, client *apiclient.Client, runID uuid.
 		ClockLayout: iostream.ClockLayout(),
 		Theme:       iostream.ResolvedTheme(ctx),
 		FailFast:    failFast,
+		NoFail:      noFail,
 		Timeout:     timeout,
 		Fetch: func(ctx context.Context) (ui.RunWatchState, error) {
 			state, err := fetchWatchState(ctx, client, runID)
@@ -326,6 +327,13 @@ func watchInteractive(ctx context.Context, client *apiclient.Client, runID uuid.
 	iostream.Printf(ctx, "%s\n\n", finalModel.ViewHeader())
 	iostream.Printf(ctx, "%s\n", strings.Join(finalModel.ViewTable(), "\n"))
 	iostream.ErrPrintf(ctx, "\n")
+	if res.RerunWfID != uuid.Nil {
+		newID, err := client.RerunWorkflow(ctx, res.RerunWfID.String(), true)
+		if err != nil {
+			return apiErr(err, res.RerunWfID.String())
+		}
+		iostream.ErrPrintf(ctx, "Rerunning failed jobs from %s as workflow %s\n", res.RerunWfID, newID)
+	}
 
 	switch {
 	case res.Cancelled:
@@ -420,6 +428,7 @@ func watchState(state runGetOutput, appURL string) ui.RunWatchState {
 	}
 	for _, wf := range state.Workflows {
 		row := ui.RunWatchWorkflow{
+			ID:        wf.ID,
 			Name:      wf.Name,
 			Symbol:    apiclient.PhaseOutcomeSymbol(wf.Phase, wf.Outcome, wf.CurrentOutcome),
 			Status:    apiclient.PhaseOutcomeText(wf.Phase, wf.Outcome, wf.CurrentOutcome),

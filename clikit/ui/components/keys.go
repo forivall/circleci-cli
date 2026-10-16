@@ -81,6 +81,7 @@ var (
 	BindSelect  = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select"))
 	BindSearch  = key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search"))
 	BindRefresh = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh"))
+	BindRerun   = key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "rerun"))
 	BindHelp    = key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help"))
 	BindQuit    = key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit"))
 

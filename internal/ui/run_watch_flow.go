@@ -119,6 +119,7 @@ type RunWatchStep struct {
 // the timings mean what they do on RunWatchJob; a workflow that has not ended has
 // no EndedAt, and one that has not started has neither.
 type RunWatchWorkflow struct {
+	ID        uuid.UUID
 	Name      string
 	URL       string
 	Symbol    string
@@ -194,6 +195,7 @@ type RunWatchResult struct {
 	Cancelled bool
 	TimedOut  bool
 	FailFast  bool
+	RerunWfID uuid.UUID
 	Err       error
 }
 
@@ -224,6 +226,7 @@ type RunWatchFlowOptions struct {
 	// FailFast ends the watch as soon as any job has failed, without waiting for
 	// the rest of the run.
 	FailFast bool
+	NoFail   bool
 
 	// Timeout ends the watch once this much time has elapsed. Zero means no
 	// timeout.
@@ -436,6 +439,12 @@ func (m RunWatchFlowModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		next, fetch := m.beginPoll()
 		next, clock := next.armClock()
 		return next, tea.Batch(fetch, clock)
+	case key.Matches(msg, components.BindRerun):
+		if m.opts.NoFail && m.result.State.Done && m.result.State.Outcome == "failed" {
+			m.result.RerunWfID = m.failedWorkflowID()
+			return m.quit()
+		}
+		return m, nil
 	}
 	return m, nil
 }
@@ -470,6 +479,11 @@ func (m RunWatchFlowModel) onState(msg runWatchStateMsg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case msg.state.Done:
+		if m.opts.NoFail && msg.state.Outcome == "failed" && m.failedWorkflowID() != uuid.Nil {
+			m.result.Elapsed = m.elapsed()
+			m.done = false
+			return m, nil
+		}
 		return m.quit()
 	case m.opts.FailFast && len(msg.state.FailedJobs()) > 0:
 		m.result.FailFast = true
@@ -667,7 +681,7 @@ func (m RunWatchFlowModel) ViewHeader() string {
 // rows never change again, so without this line a watch that is right to keep
 // waiting looks stuck on a finished table.
 func (m RunWatchFlowModel) pendingNote() string {
-	if m.done || !m.state.AllWorkflowsEnded {
+	if m.done || m.result.State.Done || !m.state.AllWorkflowsEnded {
 		return ""
 	}
 	return m.muted("All workflows have ended; waiting for the run itself to finish.")
@@ -686,9 +700,21 @@ func (m RunWatchFlowModel) footer() string {
 	if m.done {
 		return ""
 	}
+	if m.opts.NoFail && m.result.State.Done && m.result.State.Outcome == "failed" && m.failedWorkflowID() != uuid.Nil {
+		return m.line("  " + m.muted("Press R to rerun failed jobs, or Q to exit."))
+	}
 	return m.line("  "+m.spinnerPrefix()+
 		m.muted("Elapsed "+FormatElapsed(m.elapsed())+" · "+m.nextPollNote())) +
 		m.line("  "+components.HintsStyled(m.palette.Muted, runWatchKeys...))
+}
+
+func (m RunWatchFlowModel) failedWorkflowID() uuid.UUID {
+	for _, wf := range m.result.State.Workflows {
+		if wf.Status == "failed" {
+			return wf.ID
+		}
+	}
+	return uuid.Nil
 }
 
 // nextPollNote says when the run's status is next checked: a meter filling
