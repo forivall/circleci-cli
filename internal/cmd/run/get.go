@@ -156,6 +156,9 @@ type runGetOutput struct {
 	Errors         []errorOutput    `json:"errors,omitempty"`
 	Warnings       []warningOutput  `json:"warnings,omitempty"`
 	Workflows      []workflowOutput `json:"workflows"`
+
+	projectSlug    string
+	pipelineNumber int64
 }
 
 type errorOutput struct {

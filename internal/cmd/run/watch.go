@@ -438,7 +438,7 @@ func watchState(state runGetOutput, appURL string) ui.RunWatchState {
 			Jobs:      make([]ui.RunWatchJob, 0, len(wf.Jobs)),
 		}
 		if appURL != "" {
-			row.URL = cmdutil.WorkflowURL(appURL, wf.ID)
+			row.URL = cmdutil.WatchWorkflowURL(appURL, state.projectSlug, state.pipelineNumber, wf.ID)
 		}
 		for _, j := range wf.Jobs {
 			job := ui.RunWatchJob{
@@ -457,15 +457,12 @@ func watchState(state runGetOutput, appURL string) ui.RunWatchState {
 			for _, step := range j.steps {
 				stepRow := step
 				if appURL != "" {
-					stepRow.URL = cmdutil.StepURL(appURL, wf.ID, j.JobNumber, step.Execution, step.StepNum)
+					stepRow.URL = cmdutil.StepURL(appURL, state.projectSlug, state.pipelineNumber, wf.ID, j.JobNumber, step.Execution, step.StepNum)
 				}
 				job.Steps = append(job.Steps, stepRow)
 			}
 			if appURL != "" {
-				job.URL = cmdutil.JobURL(appURL, wf.ID, j.ID)
-				if j.JobNumber > 0 {
-					job.URL = cmdutil.JobNumberURL(appURL, wf.ID, j.JobNumber)
-				}
+				job.URL = cmdutil.JobNumberURL(appURL, state.projectSlug, state.pipelineNumber, wf.ID, j.JobNumber)
 			}
 			row.Jobs = append(row.Jobs, job)
 		}
@@ -504,6 +501,10 @@ func fetchWatchState(ctx context.Context, client *apiclient.Client, runID uuid.U
 	if err != nil {
 		return runGetOutput{}, err
 	}
+	pipeline, err := client.GetPipeline(ctx, runID.String())
+	if err != nil {
+		return runGetOutput{}, err
+	}
 	workflows, err := client.GetRunWorkflowsV3(ctx, runID)
 	if err != nil {
 		return runGetOutput{}, err
@@ -517,6 +518,8 @@ func fetchWatchState(ctx context.Context, client *apiclient.Client, runID uuid.U
 		wfJobs[i] = jobs
 	}
 	out := buildOutput(r, workflows, wfJobs)
+	out.projectSlug = pipeline.ProjectSlug
+	out.pipelineNumber = pipeline.Number
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(maxWorkflowFetches)
 	for i := range out.Workflows {

@@ -71,18 +71,24 @@ func WorkflowURL(appURL string, id uuid.UUID) string {
 	return fmt.Sprintf("%s/workflow/%s", appURL, id)
 }
 
+// WatchWorkflowURL returns the pipeline workflow URL used by the run watcher.
+func WatchWorkflowURL(appURL, projectSlug string, pipelineNumber int64, workflowID uuid.UUID) string {
+	projectSlug = strings.Replace(projectSlug, "gh/", "github/", 1)
+	return fmt.Sprintf("%s/pipelines/%s/%d/workflows/%s", appURL, projectSlug, pipelineNumber, workflowID)
+}
+
 func JobURL(appURL string, workflowID, jobID uuid.UUID) string {
 	return fmt.Sprintf("%s/workflow/%s/job/%s", appURL, workflowID, jobID)
 }
 
-func JobNumberURL(appURL string, workflowID uuid.UUID, jobNumber int64) string {
-	return fmt.Sprintf("%s/workflow/%s/job/%d", appURL, workflowID, jobNumber)
+func JobNumberURL(appURL, projectSlug string, pipelineNumber int64, workflowID uuid.UUID, jobNumber int64) string {
+	return fmt.Sprintf("%s/jobs/%d", WatchWorkflowURL(appURL, projectSlug, pipelineNumber, workflowID), jobNumber)
 }
 
 // StepURL returns the CircleCI page URL for a step in a parallel-run execution.
-func StepURL(appURL string, workflowID uuid.UUID, jobNumber int64, execution, stepNum int) string {
+func StepURL(appURL, projectSlug string, pipelineNumber int64, workflowID uuid.UUID, jobNumber int64, execution, stepNum int) string {
 	return fmt.Sprintf("%s/parallel-runs/%d/steps/%d-%d",
-		JobNumberURL(appURL, workflowID, jobNumber), execution, execution, stepNum)
+		JobNumberURL(appURL, projectSlug, pipelineNumber, workflowID, jobNumber), execution, execution, stepNum)
 }
 
 // ProjectURL returns the CircleCI project page URL for the given project slug.
