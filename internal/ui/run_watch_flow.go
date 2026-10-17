@@ -828,8 +828,8 @@ func (m RunWatchFlowModel) jobRow(j RunWatchJob, showType bool) string {
 		parallelRuns = fmt.Sprintf(" %d/%d", j.RunsDone, j.RunsTotal)
 	}
 	statusText := m.palette.StatusText(j.Symbol, j.Status)+parallelRuns
-	if width := ansi.StringWidth(statusText); width <= runWatchStatusCol {
-		statusText += strings.Repeat(" ", runWatchStatusCol-width)
+	if width := ansi.StringWidth(statusText); width < runWatchStatusCol {
+		statusText += strings.Repeat(" ", runWatchStatusCol-width-1)
 	}
 	row := fmt.Sprintf("    %s  %s %s",
 		pad(m.link(j.Name, j.URL), runWatchJobNameCol),
