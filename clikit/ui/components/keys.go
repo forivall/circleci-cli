@@ -82,6 +82,7 @@ var (
 	BindSearch  = key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search"))
 	BindRefresh = key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh"))
 	BindRerun   = key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "rerun"))
+	BindFailed  = key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "show failed output"))
 	BindHelp    = key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help"))
 	BindQuit    = key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit"))
 

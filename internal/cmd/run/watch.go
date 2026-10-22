@@ -23,6 +23,7 @@
 package run
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -42,6 +43,7 @@ import (
 	"github.com/CircleCI-Public/circleci-cli/internal/apiclient"
 	"github.com/CircleCI-Public/circleci-cli/internal/cmdutil"
 	"github.com/CircleCI-Public/circleci-cli/internal/gitremote"
+	"github.com/CircleCI-Public/circleci-cli/internal/termrender"
 	"github.com/CircleCI-Public/circleci-cli/internal/ui"
 )
 
@@ -299,6 +301,22 @@ func watchInteractive(ctx context.Context, client *apiclient.Client, runID uuid.
 			}
 			return watchState(state, appURL), nil
 		},
+		Output: iostream.Out(ctx),
+		FetchStepOutput: func(ctx context.Context, jobID uuid.UUID, execution, stepNum int) (string, error) {
+			stdout, err := client.GetJobStdout(ctx, jobID, execution, stepNum)
+			if err != nil {
+				return "", err
+			}
+			stderr, err := client.GetJobStderr(ctx, jobID, execution, stepNum)
+			if err != nil {
+				return "", err
+			}
+			var output bytes.Buffer
+			if err := termrender.RenderStyled(&output, bytes.NewReader(append(stdout, stderr...))); err != nil {
+				return "", err
+			}
+			return output.String(), nil
+		},
 	})
 
 	final, err := tea.NewProgram(model,
@@ -528,7 +546,7 @@ func fetchWatchState(ctx context.Context, client *apiclient.Client, runID uuid.U
 			if apiclient.PhaseNotStarted(job.Phase) {
 				continue
 			}
-			if job.Phase == apiclient.PhaseEnded {
+			if job.Phase == apiclient.PhaseEnded && job.Outcome != "failed" {
 				if job.runsTotal == 0 {
 					job.runsTotal = 1
 				}
@@ -545,8 +563,13 @@ func fetchWatchState(ctx context.Context, client *apiclient.Client, runID uuid.U
 				job.runsTotal = len(detail.Executions)
 				for _, execution := range detail.Executions {
 					var runningStep, lastNamedStep *apiclient.JobV3Step
+					hasFailedStep := false
 					for i := range execution.Steps {
 						step := &execution.Steps[i]
+						if ui.IsFailedStepStatus(step.Outcome) {
+							job.steps = appendWatchStep(job.steps, execution.Index, step, true)
+							hasFailedStep = true
+						}
 						if step.Name != "" {
 							lastNamedStep = step
 						}
@@ -557,7 +580,7 @@ func fetchWatchState(ctx context.Context, client *apiclient.Client, runID uuid.U
 					done := len(execution.Steps) > 0 && execution.Steps[len(execution.Steps)-1].StoppedAt != nil
 					if runningStep != nil {
 						job.steps = appendWatchStep(job.steps, execution.Index, runningStep, done)
-					} else if lastNamedStep != nil {
+					} else if lastNamedStep != nil && !hasFailedStep {
 						job.steps = appendWatchStep(job.steps, execution.Index, lastNamedStep, done)
 					}
 					if done {

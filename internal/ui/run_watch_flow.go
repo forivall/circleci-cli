@@ -26,6 +26,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -122,6 +124,13 @@ type RunWatchStep struct {
 	URL       string
 	StartedAt *time.Time
 	EndedAt   *time.Time
+}
+
+// RunWatchFailedStep identifies a failed step whose output can be displayed.
+type RunWatchFailedStep struct {
+	JobID   uuid.UUID
+	JobName string
+	Step    RunWatchStep
 }
 
 // RunWatchWorkflow is one workflow row and the job rows nested under it. URL and
@@ -246,7 +255,9 @@ type RunWatchFlowOptions struct {
 	PollInterval    time.Duration
 	MaxPollInterval time.Duration
 
-	Fetch func(ctx context.Context) (RunWatchState, error)
+	Fetch           func(ctx context.Context) (RunWatchState, error)
+	FetchStepOutput func(ctx context.Context, jobID uuid.UUID, execution, stepNum int) (string, error)
+	Output          io.Writer
 }
 
 // async message types carrying poll results and clock ticks into the Update loop.
@@ -257,8 +268,41 @@ type (
 	}
 	// runWatchClockMsg carries the generation of the chain that armed it, so a
 	// tick from a superseded schedule is dropped rather than acted on.
-	runWatchClockMsg struct{ gen int }
+	runWatchClockMsg      struct{ gen int }
+	runWatchStepOutputMsg struct {
+		output string
+		err    error
+	}
+	runWatchStepOutputReadyMsg struct {
+		output string
+		err    error
+	}
+	runWatchStepOutputPrintedMsg struct{ err error }
 )
+
+// runWatchOutputCommand writes step output while Bubble Tea has released the
+// terminal. This keeps the inline watch frame from overwriting the output.
+type runWatchOutputCommand struct {
+	writer io.Writer
+	output string
+}
+
+func (c *runWatchOutputCommand) Run() error {
+	output := strings.Trim(c.output, "\r\n")
+	if output == "" {
+		return nil
+	}
+	_, err := io.WriteString(c.writer, output+"\n")
+	return err
+}
+
+func (*runWatchOutputCommand) SetStdin(io.Reader) {}
+func (c *runWatchOutputCommand) SetStdout(writer io.Writer) {
+	if c.writer == nil {
+		c.writer = writer
+	}
+}
+func (*runWatchOutputCommand) SetStderr(io.Writer) {}
 
 // runWatchKeys is the footer key hint set: poll again now, or stop watching.
 // The table refreshes itself, so refresh is there for the widening poll interval
@@ -266,7 +310,7 @@ type (
 // and the footer's countdown says so. ctrl+c and esc also quit but go
 // unadvertised — the footer names the shortest form of each action, as the
 // pickers' footers do.
-var runWatchKeys = []key.Binding{components.BindRefresh, components.BindQuit}
+var runWatchKeys = []key.Binding{components.BindFailed, components.BindRefresh, components.BindQuit}
 
 // RunWatchFlowModel is the bubbletea program behind `circleci run watch` in an
 // interactive terminal: a live table of the run's workflows and their jobs, each
@@ -317,6 +361,10 @@ type RunWatchFlowModel struct {
 
 	done   bool
 	result RunWatchResult
+	inMenu bool
+	menu   components.SelectModel
+	steps  []RunWatchFailedStep
+	busy   bool
 }
 
 // NewRunWatchFlow returns a RunWatchFlowModel ready to pass to tea.NewProgram.
@@ -380,6 +428,11 @@ func (m RunWatchFlowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		if m.inMenu {
+			updated, cmd := m.menu.Update(msg)
+			m.menu = updated.(components.SelectModel)
+			return m, cmd
+		}
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -387,6 +440,30 @@ func (m RunWatchFlowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case runWatchStateMsg:
 		return m.onState(msg)
+	case runWatchStepOutputMsg:
+		m.inMenu = false
+		m.busy = true
+		return m, func() tea.Msg {
+			return runWatchStepOutputReadyMsg{output: msg.output, err: msg.err}
+		}
+	case runWatchStepOutputReadyMsg:
+		output := msg.output
+		if msg.err != nil {
+			output = "Failed to fetch step output: " + msg.err.Error()
+		}
+		writer := m.opts.Output
+		if writer == nil {
+			writer = os.Stdout
+		}
+		return m, tea.Exec(&runWatchOutputCommand{writer: writer, output: output}, func(err error) tea.Msg {
+			return runWatchStepOutputPrintedMsg{err: err}
+		})
+	case runWatchStepOutputPrintedMsg:
+		m.busy = false
+		if msg.err != nil {
+			return m, tea.Println("Failed to print step output: " + msg.err.Error())
+		}
+		return m, nil
 
 	case runWatchClockMsg:
 		return m.onClock(msg)
@@ -433,6 +510,22 @@ func (m RunWatchFlowModel) waitExpired() bool {
 // caller reports it as a cancellation so a script cannot mistake an abandoned
 // watch for a successful run.
 func (m RunWatchFlowModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.inMenu {
+		if key.Matches(msg, components.KeyEsc, components.BindQuit) {
+			m.inMenu = false
+			return m, nil
+		}
+		if key.Matches(msg, components.KeyCtrlC) {
+			m.result.Cancelled = true
+			return m.quit()
+		}
+		updated, cmd := m.menu.Update(msg)
+		m.menu = updated.(components.SelectModel)
+		if !m.menu.Done() {
+			return m, cmd
+		}
+		return m, m.cmdStepOutput(m.steps[m.menu.Selected()])
+	}
 	switch {
 	case key.Matches(msg, components.KeyCtrlC, components.KeyEsc, components.BindQuit):
 		m.result.Cancelled = true
@@ -454,8 +547,50 @@ func (m RunWatchFlowModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.quit()
 		}
 		return m, nil
+	case key.Matches(msg, components.BindFailed):
+		m.steps = m.state.FailedSteps()
+		if len(m.steps) == 1 {
+			return m, m.cmdStepOutput(m.steps[0])
+		}
+		if len(m.steps) > 1 {
+			m.inMenu = true
+			labels := make([]string, len(m.steps))
+			icons := make([]string, len(m.steps))
+			for i, step := range m.steps {
+				labels[i] = fmt.Sprintf("%s — %s (#%d)", step.JobName, step.Step.Name, step.Step.StepNum)
+				icons[i] = m.palette.StatusText("✗", "✗")
+			}
+			m.menu = components.NewSelectModel("Select a failed step", labels).
+				WithIcons(icons).
+				WithHeight(m.height)
+		}
+		return m, nil
 	}
 	return m, nil
+}
+
+func (m RunWatchFlowModel) cmdStepOutput(step RunWatchFailedStep) tea.Cmd {
+	return func() tea.Msg {
+		if m.opts.FetchStepOutput == nil {
+			return runWatchStepOutputMsg{err: errors.New("step output is unavailable")}
+		}
+		out, err := m.opts.FetchStepOutput(m.ctx, step.JobID, step.Step.Execution, step.Step.StepNum)
+		return runWatchStepOutputMsg{output: out, err: err}
+	}
+}
+
+func (s RunWatchState) FailedSteps() []RunWatchFailedStep {
+	var out []RunWatchFailedStep
+	for _, wf := range s.Workflows {
+		for _, job := range wf.Jobs {
+			for _, step := range job.Steps {
+				if IsFailedStepStatus(step.Status) {
+					out = append(out, RunWatchFailedStep{JobID: job.ID, JobName: job.Name, Step: step})
+				}
+			}
+		}
+	}
+	return out
 }
 
 // IsFailedStepStatus reports whether a terminal step status represents a
@@ -538,7 +673,7 @@ func (m RunWatchFlowModel) expireCompletedExecutions(state RunWatchState) RunWat
 			job := &state.Workflows[wi].Jobs[ji]
 			steps := job.Steps[:0]
 			for _, step := range job.Steps {
-				if !step.Done || job.RunsTotal <= 1 {
+				if !step.Done || job.RunsTotal <= 1 || IsFailedStepStatus(step.Status) {
 					steps = append(steps, step)
 					continue
 				}
@@ -655,6 +790,12 @@ func hasMultipleJobTypes(workflows []RunWatchWorkflow) bool {
 }
 
 func (m RunWatchFlowModel) buildView() tea.View {
+	if m.busy {
+		return tea.NewView("")
+	}
+	if m.inMenu {
+		return m.menu.View()
+	}
 	var b strings.Builder
 	b.WriteString(m.ViewHeader() + "\n\n")
 
@@ -743,7 +884,7 @@ func (m RunWatchFlowModel) footer() string {
 		return ""
 	}
 	if m.opts.NoFail && m.result.State.Done && m.result.State.Outcome == "failed" && m.failedWorkflowID() != uuid.Nil {
-		return m.line("  " + m.muted("Press R to rerun failed jobs, or Q to exit."))
+		return m.line("  " + m.muted("Press R to rerun failed jobs, f to show failed jobs, or Q to exit."))
 	}
 	return m.line("  "+m.spinnerPrefix()+
 		m.muted("Elapsed "+FormatElapsed(m.elapsed())+" · "+m.nextPollNote())) +
@@ -827,7 +968,7 @@ func (m RunWatchFlowModel) jobRow(j RunWatchJob, showType bool) string {
 	if j.RunsTotal > 1 {
 		parallelRuns = fmt.Sprintf(" %d/%d", j.RunsDone, j.RunsTotal)
 	}
-	statusText := m.palette.StatusText(j.Symbol, j.Status)+parallelRuns
+	statusText := m.palette.StatusText(j.Symbol, j.Status) + parallelRuns
 	if width := ansi.StringWidth(statusText); width < runWatchStatusCol {
 		statusText += strings.Repeat(" ", runWatchStatusCol-width-1)
 	}
