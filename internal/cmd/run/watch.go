@@ -355,6 +355,9 @@ func watchInteractive(ctx context.Context, client *apiclient.Client, runID uuid.
 
 	switch {
 	case res.Cancelled:
+		if res.State.Done {
+			return watchFinalResult(ctx, res.State, runID, res.Elapsed)
+		}
 		return watchInterrupted()
 	case res.Err != nil:
 		return clierrors.New("api.error", "API error while watching run", res.Err.Error()).
