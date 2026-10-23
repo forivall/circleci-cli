@@ -332,6 +332,7 @@ type RunWatchFlowModel struct {
 
 	width  int
 	height int
+	scroll int
 	start  time.Time
 	spin   spinner.Model
 	state  RunWatchState
@@ -565,8 +566,36 @@ func (m RunWatchFlowModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				WithHeight(m.height)
 		}
 		return m, nil
+	case key.Matches(msg, components.KeyUp, components.KeyDown):
+		available := m.tableViewportHeight()
+		rows := m.ViewTable()
+		if len(rows) > available {
+			delta := 1
+			if key.Matches(msg, components.KeyUp) {
+				delta = -1
+			}
+			maxOffset := max(0, len(rows)-max(1, available-1))
+			page := max(1, m.height/3)
+			m.scroll = min(maxOffset, max(0, m.scroll+delta*page))
+			return m, nil
+		}
+
 	}
 	return m, nil
+}
+
+func (m RunWatchFlowModel) tableViewportHeight() int {
+	if m.height <= 0 {
+		return 0
+	}
+	reserved := 2 // title and blank line below it
+	if m.pendingNote() != "" {
+		reserved++
+	}
+	if footer := m.footer(); footer != "" {
+		reserved += strings.Count(footer, "\n") + 1
+	}
+	return max(0, m.height-reserved)
 }
 
 func (m RunWatchFlowModel) cmdStepOutput(step RunWatchFailedStep) tea.Cmd {
@@ -837,30 +866,30 @@ func (m RunWatchFlowModel) buildView() tea.View {
 
 	rows := m.ViewTable()
 	note := m.pendingNote()
-	// Inline rendering scrolls the terminal when a frame is taller than its
-	// viewport. Once that happens the header (and therefore the run identity)
-	// disappears, including from the final frame. Keep the frame within the
-	// reported height and reserve room for the live footer; the omission marker
-	// makes a large workflow table visibly incomplete instead of silently
-	// scrolling its first rows away.
+	// Keep the frame within the viewport so the header and live footer remain
+	// fixed while a large table is scrolled.
 	footer := m.footer()
 	// A live frame must fit the viewport to keep its header from scrolling away.
 	if m.height > 0 {
-		noteLines := 0
-		if note != "" {
-			noteLines = 1
-		}
-		footerAndSeparatorLines := 0
-		if footer != "" {
-			footerAndSeparatorLines = strings.Count(footer, "\n") + 1
-		}
-		available := max(0, m.height-2-noteLines-footerAndSeparatorLines)
+		available := m.tableViewportHeight()
 		if len(rows) > available {
-			if available > 0 {
-				rows = append(rows[:available-1], fmt.Sprintf("  … %d more rows", len(rows)-available+1))
-			} else {
+			if available == 0 {
 				rows = nil
+			} else {
+				window := max(1, available-1)
+				maxOffset := max(0, len(rows)-window)
+				offset := min(m.scroll, maxOffset)
+				end := min(len(rows), offset+window)
+				visible := append([]string(nil), rows[offset:end]...)
+				if end < len(rows) {
+					visible = append(visible, fmt.Sprintf("  … %d more rows", len(rows)-end))
+				} else {
+					visible = append(visible, fmt.Sprintf("  … %d rows above", offset))
+				}
+				rows = visible
 			}
+		} else {
+			m.scroll = 0
 		}
 	}
 	for _, row := range rows {
