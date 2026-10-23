@@ -992,27 +992,40 @@ func deriveDisplayStatus(r runGetOutput) string {
 	if len(r.Errors) > 0 {
 		return "failed"
 	}
-	for _, wf := range r.Workflows {
+	latestWorkflows := getLatestWorkflows(r.Workflows)
+	for _, wf := range latestWorkflows {
 		if wf.Outcome == "failed" || wf.Outcome == "errored" || wf.CurrentOutcome == "failed" {
 			return "failed"
 		}
 	}
-	for _, wf := range r.Workflows {
+	for _, wf := range latestWorkflows {
 		if wf.Phase != "ended" {
 			return "running"
 		}
 	}
-	for _, wf := range r.Workflows {
+	for _, wf := range latestWorkflows {
 		if wf.Outcome == statusCanceled {
 			return statusCanceled
 		}
 	}
-	for _, wf := range r.Workflows {
+	for _, wf := range latestWorkflows {
 		if wf.Outcome == "succeeded" {
 			return "succeeded"
 		}
 	}
 	return apiclient.PhaseOutcomeStatus(r.Phase, r.Outcome, r.CurrentOutcome)
+}
+
+func getLatestWorkflows(workflows []workflowOutput) []workflowOutput {
+	seen := make(map[string]bool, len(workflows))
+	latest := make([]workflowOutput, 0, len(workflows))
+	for _, wf := range workflows {
+		if !seen[wf.Name] {
+			seen[wf.Name] = true
+			latest = append(latest, wf)
+		}
+	}
+	return latest
 }
 
 func printRun(ctx context.Context, r runGetOutput, u string) {
