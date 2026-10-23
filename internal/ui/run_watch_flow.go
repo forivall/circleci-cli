@@ -588,7 +588,7 @@ func (m RunWatchFlowModel) tableViewportHeight() int {
 	if m.height <= 0 {
 		return 0
 	}
-	reserved := 2 // title and blank line below it
+	reserved := 3 // title, blank line below it, and inline-renderer safety row
 	if m.pendingNote() != "" {
 		reserved++
 	}
@@ -853,7 +853,7 @@ func (m RunWatchFlowModel) buildView() tea.View {
 		failedTree := m
 		failedTree.state = failedState
 		var b strings.Builder
-		b.WriteString(m.ViewHeader() + "\n\n")
+		b.WriteString(m.line(m.ViewHeader()) + "\n")
 		for _, row := range failedTree.ViewTable() {
 			b.WriteString(m.line(row))
 		}
@@ -864,7 +864,7 @@ func (m RunWatchFlowModel) buildView() tea.View {
 		return tea.NewView(b.String())
 	}
 	var b strings.Builder
-	b.WriteString(m.ViewHeader() + "\n\n")
+	b.WriteString(m.line(m.ViewHeader()) + "\n")
 
 	if !m.loaded {
 		b.WriteString(m.line("  " + m.spinnerPrefix() + m.muted("Fetching run status…")))
