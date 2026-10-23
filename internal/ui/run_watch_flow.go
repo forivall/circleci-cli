@@ -768,6 +768,9 @@ func (m RunWatchFlowModel) ViewTable() []string {
 			rows = append(rows, m.jobRow(j, showJobType))
 			for _, step := range j.Steps {
 				rows = append(rows, m.currentStepRow(step, j.RunsTotal > 1))
+				if step.Command != "" && IsFailedStepStatus(step.Status) {
+					rows = append(rows, m.stepCommandRow(step))
+				}
 			}
 		}
 	}
@@ -997,13 +1000,14 @@ func (m RunWatchFlowModel) currentStepRow(step RunWatchStep, parallel bool) stri
 		m.palette.StatusText(symbol, symbol),
 		m.statusWord(symbol, step.Status),
 		m.timing(step.StartedAt, step.EndedAt))
-	if step.Command != "" && IsFailedStepStatus(step.Status) {
-		command := strings.TrimSpace(step.Command)
-		command = strings.ReplaceAll(command, "\r\n", "\n")
-		command = strings.ReplaceAll(command, "\n", "\n        ")
-		row += "\n        " + m.palette.Muted.Render(command)
-	}
 	return row
+}
+func (m RunWatchFlowModel) stepCommandRow(step RunWatchStep) string {
+	command := strings.TrimPrefix(step.Command, "#!/bin/bash -eo pipefail")
+	command = strings.TrimSpace(command)
+	command = strings.ReplaceAll(command, "\r\n", "\n")
+	command = strings.ReplaceAll(command, "\n", "\n        ")
+	return "        " + m.palette.Muted.Render(command)
 }
 
 // link renders a row's name as a clickable OSC-8 hyperlink to its page in the
