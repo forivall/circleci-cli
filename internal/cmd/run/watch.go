@@ -351,6 +351,15 @@ func watchInteractive(ctx context.Context, client *apiclient.Client, runID uuid.
 			return apiErr(err, res.RerunWfID.String())
 		}
 		iostream.ErrPrintf(ctx, "Rerunning failed jobs from %s as workflow %s\n", res.RerunWfID, newID)
+		newWorkflowID, err := uuid.Parse(newID)
+		if err != nil {
+			return clierrors.New("run.watch_invalid_workflow_id", "Invalid workflow ID from rerun", err.Error()).
+				WithExitCode(clierrors.ExitAPIError)
+		}
+		if err := waitForWorkflowInRun(ctx, client, runID, newWorkflowID, timeout); err != nil {
+			return err
+		}
+		return watchInteractive(ctx, client, runID, branch, timeout, failFast, noFail)
 	}
 
 	switch {
@@ -368,6 +377,31 @@ func watchInteractive(ctx context.Context, client *apiclient.Client, runID uuid.
 		return watchFailFastResult(ctx, res.State, runID, res.Elapsed)
 	default:
 		return watchFinalResult(ctx, res.State, runID, res.Elapsed)
+	}
+}
+
+func waitForWorkflowInRun(ctx context.Context, client *apiclient.Client, runID, workflowID uuid.UUID, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		workflows, err := client.GetRunWorkflowsV3(ctx, runID)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return watchInterrupted()
+			}
+			return clierrors.New("api.error", "API error while watching run", err.Error()).
+				WithExitCode(clierrors.ExitAPIError)
+		}
+		for _, workflow := range workflows {
+			if workflow.ID == workflowID {
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return watchTimedOut(runID, timeout)
+		}
+		if err := sleepOrCancel(ctx, ui.RunWatchPollInterval); err != nil {
+			return watchInterrupted()
+		}
 	}
 }
 
