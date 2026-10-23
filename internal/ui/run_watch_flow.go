@@ -797,7 +797,35 @@ func (m RunWatchFlowModel) buildView() tea.View {
 		return tea.NewView("")
 	}
 	if m.inMenu {
-		return m.menu.View()
+		// Keep the failed jobs in view while the step picker is open. The picker
+		// replaces the live table, so project the current state down to workflows
+		// that contain failed jobs and render that tree immediately above it.
+		failedState := m.state
+		failedState.Workflows = nil
+		for _, wf := range m.state.Workflows {
+			failedJobs := make([]RunWatchJob, 0, len(wf.Jobs))
+			for _, job := range wf.Jobs {
+				if job.Failed {
+					failedJobs = append(failedJobs, job)
+				}
+			}
+			if len(failedJobs) > 0 {
+				wf.Jobs = failedJobs
+				failedState.Workflows = append(failedState.Workflows, wf)
+			}
+		}
+		failedTree := m
+		failedTree.state = failedState
+		var b strings.Builder
+		b.WriteString(m.ViewHeader() + "\n\n")
+		for _, row := range failedTree.ViewTable() {
+			b.WriteString(m.line(row))
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(m.menu.View().Content)
+		return tea.NewView(b.String())
 	}
 	var b strings.Builder
 	b.WriteString(m.ViewHeader() + "\n\n")
