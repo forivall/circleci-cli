@@ -489,7 +489,24 @@ func watchState(state runGetOutput, appURL string) ui.RunWatchState {
 		}
 		out.Workflows = append(out.Workflows, row)
 	}
+	out.Workflows = latestWatchWorkflows(out.Workflows)
 	return out
+}
+
+func latestWatchWorkflows(workflows []ui.RunWatchWorkflow) []ui.RunWatchWorkflow {
+	latest := make(map[string]int, len(workflows))
+	for i, wf := range workflows {
+		if previous, ok := latest[wf.Name]; !ok || wf.CreatedAt.After(workflows[previous].CreatedAt) {
+			latest[wf.Name] = i
+		}
+	}
+	filtered := make([]ui.RunWatchWorkflow, 0, len(workflows))
+	for i, wf := range workflows {
+		if wf.EndedAt == nil || latest[wf.Name] == i {
+			filtered = append(filtered, wf)
+		}
+	}
+	return filtered
 }
 
 func sleepOrCancel(ctx context.Context, d time.Duration) error {

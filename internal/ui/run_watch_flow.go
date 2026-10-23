@@ -791,8 +791,15 @@ func (m RunWatchFlowModel) View() tea.View {
 func (m RunWatchFlowModel) ViewTable() []string {
 	var rows []string
 	showJobType := hasMultipleJobTypes(m.state.Workflows)
+	workflowNames := make(map[string]struct{}, len(m.state.Workflows))
+	for _, wf := range m.state.Workflows {
+		workflowNames[wf.Name] = struct{}{}
+	}
 	for _, wf := range m.state.Workflows {
 		rows = append(rows, m.workflowRow(wf))
+		if len(workflowNames) > 1 && wf.EndedAt != nil {
+			continue
+		}
 		for _, j := range wf.Jobs {
 			rows = append(rows, m.jobRow(j, showJobType))
 			for _, step := range j.Steps {
