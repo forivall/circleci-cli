@@ -66,6 +66,7 @@ const (
 	runWatchJobNameCol      = 28
 	runWatchStepNameCol     = 26
 	runWatchStatusCol       = 12
+	runWatchSuffixCol       = 40
 )
 
 // The footer's poll meter: how many cells it is drawn in, and the filled and
@@ -186,6 +187,10 @@ type RunWatchState struct {
 	AllWorkflowsEnded bool
 
 	Outcome string
+
+	MaxWorkflowNameLength int
+	MaxJobNameLength      int
+	MaxStepNameLength     int
 }
 
 // FailedJobs returns every job across every workflow whose outcome is a failure,
@@ -1016,13 +1021,22 @@ func (m RunWatchFlowModel) pollMeter(remaining time.Duration) string {
 		strings.Repeat(runWatchMeterEmpty, runWatchMeterCells-filled)
 }
 
+func (m RunWatchFlowModel) nameColExtra() int {
+	runWatchExtraColMax := max(
+		m.state.MaxWorkflowNameLength-runWatchWorkflowNameCol,
+		m.state.MaxJobNameLength-runWatchJobNameCol,
+		m.state.MaxStepNameLength-runWatchStepNameCol,
+	)
+	return min(max(0, m.width-runWatchWorkflowNameCol-runWatchStatusCol-runWatchSuffixCol), runWatchExtraColMax)
+}
+
 // workflowRow renders a workflow's name, status and timing. The name links to
 // the workflow in the CircleCI app and the trailing column is how long it has
 // run and the clock window it ran in — live for a workflow still going, since
 // the flow redraws every second.
 func (m RunWatchFlowModel) workflowRow(wf RunWatchWorkflow) string {
 	return fmt.Sprintf("  %s  %s %s %s",
-		pad(m.link(wf.Name, wf.URL), runWatchWorkflowNameCol),
+		pad(m.link(wf.Name, wf.URL), runWatchWorkflowNameCol+m.nameColExtra()),
 		m.palette.StatusText(wf.Symbol, wf.Symbol),
 		m.statusWord(wf.Symbol, wf.Status),
 		m.timing(&wf.CreatedAt, wf.EndedAt))
@@ -1040,7 +1054,7 @@ func (m RunWatchFlowModel) jobRow(j RunWatchJob, showType bool) string {
 		statusText += strings.Repeat(" ", runWatchStatusCol-width-1)
 	}
 	row := fmt.Sprintf("    %s  %s %s",
-		pad(m.link(j.Name, j.URL), runWatchJobNameCol),
+		pad(m.link(j.Name, j.URL), runWatchJobNameCol+m.nameColExtra()),
 		m.palette.StatusText(j.Symbol, j.Symbol),
 		statusText)
 	if showType {
@@ -1060,7 +1074,7 @@ func (m RunWatchFlowModel) currentStepRow(step RunWatchStep, parallel bool) stri
 		symbol = "●"
 	}
 	row := fmt.Sprintf("      %s  %s %s %s",
-		pad(m.link(label, step.URL), runWatchStepNameCol),
+		pad(m.link(label, step.URL), runWatchStepNameCol+m.nameColExtra()),
 		m.palette.StatusText(symbol, symbol),
 		m.statusWord(symbol, step.Status),
 		m.timing(step.StartedAt, step.EndedAt))

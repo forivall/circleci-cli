@@ -495,6 +495,10 @@ func watchState(state runGetOutput, appURL string) ui.RunWatchState {
 		if appURL != "" {
 			row.URL = cmdutil.WatchWorkflowURL(appURL, state.projectSlug, state.pipelineNumber, wf.ID)
 		}
+		nameLen := len(wf.Name)
+		if nameLen > out.MaxWorkflowNameLength {
+			out.MaxWorkflowNameLength = nameLen
+		}
 		for _, j := range wf.Jobs {
 			job := ui.RunWatchJob{
 				ID:        j.ID,
@@ -509,12 +513,20 @@ func watchState(state runGetOutput, appURL string) ui.RunWatchState {
 				RunsTotal: j.runsTotal,
 				Steps:     make([]ui.RunWatchStep, 0, len(j.steps)),
 			}
+			nameLen := len(job.Name)
+			if nameLen > out.MaxJobNameLength {
+				out.MaxJobNameLength = nameLen
+			}
 			for _, step := range j.steps {
 				stepRow := step
 				if appURL != "" {
 					stepRow.URL = cmdutil.StepURL(appURL, state.projectSlug, state.pipelineNumber, wf.ID, j.JobNumber, step.Execution, step.StepNum)
 				}
 				job.Steps = append(job.Steps, stepRow)
+				nameLen := len(step.Name)
+				if nameLen > out.MaxStepNameLength {
+					out.MaxStepNameLength = nameLen
+				}
 			}
 			if appURL != "" {
 				job.URL = cmdutil.JobNumberURL(appURL, state.projectSlug, state.pipelineNumber, wf.ID, j.JobNumber)
