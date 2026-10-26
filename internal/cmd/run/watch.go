@@ -495,7 +495,7 @@ func watchState(state runGetOutput, appURL string) ui.RunWatchState {
 		if appURL != "" {
 			row.URL = cmdutil.WatchWorkflowURL(appURL, state.projectSlug, state.pipelineNumber, wf.ID)
 		}
-		nameLen := len(wf.Name)
+		nameLen := firstLineLen(wf.Name)
 		if nameLen > out.MaxWorkflowNameLength {
 			out.MaxWorkflowNameLength = nameLen
 		}
@@ -513,7 +513,7 @@ func watchState(state runGetOutput, appURL string) ui.RunWatchState {
 				RunsTotal: j.runsTotal,
 				Steps:     make([]ui.RunWatchStep, 0, len(j.steps)),
 			}
-			nameLen := len(job.Name)
+			nameLen := firstLineLen(job.Name)
 			if nameLen > out.MaxJobNameLength {
 				out.MaxJobNameLength = nameLen
 			}
@@ -523,7 +523,7 @@ func watchState(state runGetOutput, appURL string) ui.RunWatchState {
 					stepRow.URL = cmdutil.StepURL(appURL, state.projectSlug, state.pipelineNumber, wf.ID, j.JobNumber, step.Execution, step.StepNum)
 				}
 				job.Steps = append(job.Steps, stepRow)
-				nameLen := len(step.Name)
+				nameLen := firstLineLen(step.Name)
 				if nameLen > out.MaxStepNameLength {
 					out.MaxStepNameLength = nameLen
 				}
@@ -537,6 +537,15 @@ func watchState(state runGetOutput, appURL string) ui.RunWatchState {
 	}
 	out.Workflows = latestWatchWorkflows(out.Workflows)
 	return out
+}
+
+// firstLineLen returns the byte length used for sizing a name column,
+// stopping at the first line break.
+func firstLineLen(name string) int {
+	if i := strings.IndexAny(name, "\r\n"); i >= 0 {
+		return i
+	}
+	return len(name)
 }
 
 func latestWatchWorkflows(workflows []ui.RunWatchWorkflow) []ui.RunWatchWorkflow {
