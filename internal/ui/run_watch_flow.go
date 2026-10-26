@@ -27,6 +27,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"math/bits"
 	"os"
 	"strings"
 	"time"
@@ -77,6 +79,30 @@ const (
 	runWatchMeterFull  = "▰"
 	runWatchMeterEmpty = "▱"
 )
+
+const runWatchWaterfallCells = 24
+
+// Separated block sextants encode every non-empty subset of six subcells.
+// runWatchSextantGlyph maps a six-bit left-to-right, top-to-bottom subcell mask
+// to its Unicode character.
+func runWatchSextantGlyph(mask uint8) string {
+	if mask == 0 {
+		return " "
+	}
+	highest := bits.Len8(mask)
+	lowerMask := int(mask & uint8((1<<(highest-1))-1))
+	index := (1 << (highest - 1)) - 1 + lowerMask
+	return string(rune(0x1CE51 + index))
+}
+
+// Job bars use half-cell segments through the middle row to avoid block
+// overscan. Sextant 3 marks the left half, 4 the right half, and 34 both.
+var runWatchJobSextants = [...]string{" ", "🬃", "🬇", "🬋"}
+
+func runWatchJobSextant(start, end int) string {
+	mask := uint8((1<<end)-1) &^ uint8((1<<start)-1)
+	return runWatchJobSextants[mask]
+}
 
 // runWatchClockLayout is how a row's timing column renders a timestamp when the
 // caller supplied no locale-specific layout: a plain 24-hour clock, paired with
@@ -806,9 +832,9 @@ func (m RunWatchFlowModel) ViewTable() []string {
 			continue
 		}
 		for _, j := range wf.Jobs {
-			rows = append(rows, m.jobRow(j, showJobType))
+			rows = append(rows, m.jobRow(j, wf, showJobType))
 			for _, step := range j.Steps {
-				rows = append(rows, m.currentStepRow(step, j.RunsTotal > 1))
+				rows = append(rows, m.currentStepRow(step, wf, j.RunsTotal > 1))
 				if step.Command != "" && IsFailedStepStatus(step.Status) {
 					rows = append(rows, m.stepCommandRow(step))
 				}
@@ -1044,7 +1070,7 @@ func (m RunWatchFlowModel) workflowRow(wf RunWatchWorkflow) string {
 
 // jobRow renders one job, indented under its workflow, with the same link and
 // timing columns as its workflow's row.
-func (m RunWatchFlowModel) jobRow(j RunWatchJob, showType bool) string {
+func (m RunWatchFlowModel) jobRow(j RunWatchJob, wf RunWatchWorkflow, showType bool) string {
 	parallelRuns := ""
 	if j.RunsTotal > 1 {
 		parallelRuns = fmt.Sprintf(" %d/%d", j.RunsDone, j.RunsTotal)
@@ -1060,10 +1086,10 @@ func (m RunWatchFlowModel) jobRow(j RunWatchJob, showType bool) string {
 	if showType {
 		row += "  " + j.Type
 	}
-	return row + "  " + m.timing(j.StartedAt, j.EndedAt)
+	return row + "  " + m.rowJobWaterfall(j.StartedAt, j.EndedAt, &wf.CreatedAt, wf.EndedAt)
 }
 
-func (m RunWatchFlowModel) currentStepRow(step RunWatchStep, parallel bool) string {
+func (m RunWatchFlowModel) currentStepRow(step RunWatchStep, wf RunWatchWorkflow, parallel bool) string {
 	label := fmt.Sprintf("%s %s", fmt.Sprintf("#%d", step.StepNum), step.Name)
 	if parallel {
 		execution := m.palette.Accent.Render(fmt.Sprintf("%d", step.Execution))
@@ -1077,7 +1103,7 @@ func (m RunWatchFlowModel) currentStepRow(step RunWatchStep, parallel bool) stri
 		pad(m.link(label, step.URL), runWatchStepNameCol+m.nameColExtra()),
 		m.palette.StatusText(symbol, symbol),
 		m.statusWord(symbol, step.Status),
-		m.timing(step.StartedAt, step.EndedAt))
+		m.rowWaterfall(step.StartedAt, step.EndedAt, &wf.CreatedAt, wf.EndedAt))
 	return row
 }
 func (m RunWatchFlowModel) stepCommandRow(step RunWatchStep) string {
@@ -1123,6 +1149,63 @@ func (m RunWatchFlowModel) timing(start *time.Time, end *time.Time) string {
 	}
 	return m.palette.Mute(m.palette.Warning).Render(FormatElapsed(d)) +
 		m.muted("  @ "+clock)
+}
+
+// rowWaterfall draws a job or step interval against its workflow's total
+// window. The workflow row remains the source of explicit clock timestamps.
+func (m RunWatchFlowModel) rowWaterfall(start, end, origin, workflowEnd *time.Time) string {
+	return m.rowWaterfallWith(start, end, origin, workflowEnd, 6, func(from, to int) string {
+		var mask uint8
+		for subcell := from; subcell < to; subcell++ {
+			mask |= 1 << subcell
+		}
+		return runWatchSextantGlyph(mask)
+	})
+}
+
+// rowJobWaterfall draws a job against the workflow window with the three
+// single-band sextants selected to stay visually crisp at terminal scale.
+func (m RunWatchFlowModel) rowJobWaterfall(start, end, origin, workflowEnd *time.Time) string {
+	return m.rowWaterfallWith(start, end, origin, workflowEnd, 2, runWatchJobSextant)
+}
+
+func (m RunWatchFlowModel) rowWaterfallWith(start, end, origin, workflowEnd *time.Time, subdivisions int, glyph func(int, int) string) string {
+	if start == nil || start.IsZero() || origin == nil || origin.IsZero() {
+		return strings.Repeat(" ", 10+runWatchWaterfallCells)
+	}
+	spanEnd := time.Now()
+	if workflowEnd != nil {
+		spanEnd = *workflowEnd
+	}
+	span := spanEnd.Sub(*origin)
+	if span <= 0 {
+		span = time.Second
+	}
+	rowEnd := time.Now()
+	if end != nil {
+		rowEnd = *end
+	}
+	units := runWatchWaterfallCells * subdivisions
+	left := int(math.Floor(float64(start.Sub(*origin)) / float64(span) * float64(units)))
+	right := int(math.Ceil(float64(rowEnd.Sub(*origin)) / float64(span) * float64(units)))
+	left = min(max(left, 0), units-1)
+	right = min(max(right, left+1), units)
+	bar := make([]string, runWatchWaterfallCells)
+	for cell := range bar {
+		from := max(left, cell*subdivisions) - cell*subdivisions
+		to := min(right, (cell+1)*subdivisions) - cell*subdivisions
+		if to <= from {
+			bar[cell] = " "
+			continue
+		}
+		bar[cell] = glyph(from, to)
+	}
+	d := rowEnd.Sub(*start)
+	if end == nil {
+		d = time.Since(*start)
+	}
+	duration := fmt.Sprintf("%-8s", FormatElapsed(d))
+	return m.palette.Mute(m.palette.Warning).Render(duration) + "  " + strings.Join(bar, "")
 }
 
 // clockLayout is the layout the timing column renders timestamps with: the
