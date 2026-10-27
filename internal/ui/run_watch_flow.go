@@ -246,8 +246,17 @@ type RunWatchResult struct {
 	TimedOut  bool
 	FailFast  bool
 	RerunWfID uuid.UUID
+	AutoRerun AutoRerunMode
 	Err       error
 }
+
+type AutoRerunMode uint8
+
+const (
+	AutoRerunOff AutoRerunMode = iota
+	AutoRerunOnce
+	AutoRerunOn
+)
 
 // RunWatchFlowOptions configures a RunWatchFlowModel. Fetch is the only required
 // field: it returns the run's current state and is called once on start and then
@@ -277,6 +286,8 @@ type RunWatchFlowOptions struct {
 	// the rest of the run.
 	FailFast bool
 	NoFail   bool
+
+	AutoRerun AutoRerunMode
 
 	// Timeout ends the watch once this much time has elapsed. Zero means no
 	// timeout.
@@ -342,7 +353,7 @@ func (*runWatchOutputCommand) SetStderr(io.Writer) {}
 // and the footer's countdown says so. ctrl+c and esc also quit but go
 // unadvertised — the footer names the shortest form of each action, as the
 // pickers' footers do.
-var runWatchKeys = []key.Binding{components.BindFailed, components.BindRefresh, components.BindQuit}
+var runWatchKeys = []key.Binding{components.BindFailed, components.BindRefresh, components.BindRerun, components.BindQuit}
 
 // RunWatchFlowModel is the bubbletea program behind `circleci run watch` in an
 // interactive terminal: a live table of the run's workflows and their jobs, each
@@ -422,6 +433,7 @@ func NewRunWatchFlow(ctx context.Context, opts RunWatchFlowOptions) RunWatchFlow
 		spin:     spin,
 		nextWait: opts.PollInterval,
 		complete: make(map[string]bool),
+		result:   RunWatchResult{AutoRerun: opts.AutoRerun},
 		// Init's first act is to fetch, so the model starts mid-poll.
 		polling: true,
 	}
@@ -575,9 +587,16 @@ func (m RunWatchFlowModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		next, clock := next.armClock()
 		return next, tea.Batch(fetch, clock)
 	case key.Matches(msg, components.BindRerun):
-		if m.opts.NoFail && m.result.State.Done && m.result.State.Outcome == "failed" {
+		if m.result.State.Done && m.result.State.Outcome == "failed" {
 			m.result.RerunWfID = m.failedWorkflowID()
 			return m.quit()
+		}
+		if m.result.State.Outcome == "failed" {
+			m.result.AutoRerun = (m.result.AutoRerun + 1) % 3
+		} else if m.result.AutoRerun == AutoRerunOff {
+			m.result.AutoRerun = AutoRerunOnce
+		} else {
+			m.result.AutoRerun = AutoRerunOff
 		}
 		return m, nil
 	case key.Matches(msg, components.BindFailed):
@@ -695,6 +714,12 @@ func (m RunWatchFlowModel) onState(msg runWatchStateMsg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case msg.state.Done:
+		if m.result.AutoRerun != AutoRerunOff && msg.state.Outcome == "failed" {
+			m.result.RerunWfID = m.failedWorkflowID()
+			if m.result.RerunWfID != uuid.Nil {
+				return m.quit()
+			}
+		}
 		if m.opts.NoFail && msg.state.Outcome == "failed" && m.failedWorkflowID() != uuid.Nil {
 			m.result.Elapsed = m.elapsed()
 			m.done = false
@@ -985,8 +1010,15 @@ func (m RunWatchFlowModel) footer() string {
 	if m.opts.NoFail && m.result.State.Done && m.result.State.Outcome == "failed" && m.failedWorkflowID() != uuid.Nil {
 		return m.line("  " + m.muted("Press R to rerun failed jobs, f to show failed jobs, or Q to exit."))
 	}
+	autoRerun := ""
+	switch m.result.AutoRerun {
+	case AutoRerunOnce:
+		autoRerun = " · auto-rerun once"
+	case AutoRerunOn:
+		autoRerun = " · auto-rerun on"
+	}
 	return m.line("  "+m.spinnerPrefix()+
-		m.muted("Elapsed "+FormatElapsed(m.elapsed())+" · "+m.nextPollNote())) +
+		m.muted("Elapsed "+FormatElapsed(m.elapsed())+" · "+m.nextPollNote()+autoRerun)) +
 		m.line("  "+components.HintsStyled(m.palette.Muted, runWatchKeys...))
 }
 

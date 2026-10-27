@@ -212,7 +212,7 @@ func runWatch(ctx context.Context, client *apiclient.Client, args []string, proj
 	// header. Everywhere else — piped, redirected, or CI — the run is announced on
 	// one line and progress is reported a line at a time.
 	if iostream.IsInteractive(ctx) {
-		return watchInteractive(ctx, client, r.ID, displayBranch, timeout, failFast, noFail, all)
+		return watchInteractive(ctx, client, r.ID, displayBranch, timeout, failFast, noFail, all, ui.AutoRerunOff)
 	}
 
 	iostream.ErrPrintf(ctx, "Watching run %s (%s)\n\n", r.ID, displayBranch)
@@ -283,7 +283,7 @@ func waitForRunBySHA(ctx context.Context, client *apiclient.Client, projectSlug,
 // outcome; the summary line and exit code are decided here, by the same
 // functions the non-interactive path uses, so both agree on what a failed run
 // looks like.
-func watchInteractive(ctx context.Context, client *apiclient.Client, runID uuid.UUID, branch string, timeout time.Duration, failFast, noFail, all bool) error {
+func watchInteractive(ctx context.Context, client *apiclient.Client, runID uuid.UUID, branch string, timeout time.Duration, failFast, noFail, all bool, autoRerun ui.AutoRerunMode) error {
 	appURL, err := cmdutil.AppURL(ctx)
 	if failFast && err != nil {
 		return err
@@ -297,6 +297,7 @@ func watchInteractive(ctx context.Context, client *apiclient.Client, runID uuid.
 		Theme:       iostream.ResolvedTheme(ctx),
 		FailFast:    failFast,
 		NoFail:      noFail,
+		AutoRerun:   autoRerun,
 		Timeout:     timeout,
 		Fetch: func(ctx context.Context) (ui.RunWatchState, error) {
 			state, err := fetchWatchState(ctx, client, runID)
@@ -364,7 +365,11 @@ func watchInteractive(ctx context.Context, client *apiclient.Client, runID uuid.
 		if err := waitForWorkflowInRun(ctx, client, runID, newWorkflowID, timeout); err != nil {
 			return err
 		}
-		return watchInteractive(ctx, client, runID, branch, timeout, failFast, noFail, all)
+		nextAutoRerunMode := res.AutoRerun
+		if nextAutoRerunMode == ui.AutoRerunOnce {
+			nextAutoRerunMode = ui.AutoRerunOff
+		}
+		return watchInteractive(ctx, client, runID, branch, timeout, failFast, noFail, all, nextAutoRerunMode)
 	}
 
 	switch {
