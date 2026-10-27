@@ -27,7 +27,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"math/bits"
 	"os"
 	"strings"
@@ -82,24 +81,26 @@ const (
 
 const runWatchWaterfallCells = 24
 
-// Separated block sextants encode every non-empty subset of six subcells.
-// runWatchSextantGlyph maps a six-bit left-to-right, top-to-bottom subcell mask
-// to its Unicode character.
-func runWatchSextantGlyph(mask uint8) string {
-	if mask == 0 {
-		return " "
+// runWatchBrailleGlyph maps a six-bit left-to-right, top-to-bottom subcell mask
+// to the equivalent six-dot Braille pattern. Braille numbers its dots down each
+// column, so the bits are reordered from the row-major waterfall mask.
+func runWatchBrailleGlyph(mask uint8) string {
+	var dots uint8
+	dotForSubcell := [...]uint8{0, 3, 1, 4, 2, 5}
+	for subcell, dot := range dotForSubcell {
+		if mask&(1<<subcell) != 0 {
+			dots |= 1 << dot
+		}
 	}
-	highest := bits.Len8(mask)
-	lowerMask := int(mask & uint8((1<<(highest-1))-1))
-	index := (1 << (highest - 1)) - 1 + lowerMask
-	return string(rune(0x1CE51 + index))
+	return string(rune(0x2800 + int(dots)))
 }
 
 // Job bars use half-cell segments through the middle row to avoid block
 // overscan. Sextant 3 marks the left half, 4 the right half, and 34 both.
 var runWatchJobSextants = [...]string{" ", "🬃", "🬇", "🬋"}
+var runWatchJobEighths = [...]string{" ", "🯦", "🯧", "𜴳"}
 
-func runWatchJobSextant(start, end int) string {
+func runWatchJobEighth(start, end int) string {
 	mask := uint8((1<<end)-1) &^ uint8((1<<start)-1)
 	return runWatchJobSextants[mask]
 }
@@ -1076,17 +1077,24 @@ func (m RunWatchFlowModel) jobRow(j RunWatchJob, wf RunWatchWorkflow, showType b
 		parallelRuns = fmt.Sprintf(" %d/%d", j.RunsDone, j.RunsTotal)
 	}
 	statusText := m.palette.StatusText(j.Symbol, j.Status) + parallelRuns
-	if width := ansi.StringWidth(statusText); width < runWatchStatusCol {
-		statusText += strings.Repeat(" ", runWatchStatusCol-width-1)
+	statusWidth := ansi.StringWidth(statusText)
+	if statusWidth <= runWatchStatusCol {
+		statusText += strings.Repeat(" ", runWatchStatusCol-statusWidth)
 	}
 	row := fmt.Sprintf("    %s  %s %s",
 		pad(m.link(j.Name, j.URL), runWatchJobNameCol+m.nameColExtra()),
 		m.palette.StatusText(j.Symbol, j.Symbol),
 		statusText)
+	waterfall := " " + m.rowJobWaterfall(j.StartedAt, j.EndedAt, &wf.CreatedAt, wf.EndedAt)
+	if statusWidth > runWatchStatusCol {
+		waterfall = waterfall[statusWidth-runWatchStatusCol:]
+	}
+	row += waterfall
+	// if statusText
 	if showType {
 		row += "  " + j.Type
 	}
-	return row + "  " + m.rowJobWaterfall(j.StartedAt, j.EndedAt, &wf.CreatedAt, wf.EndedAt)
+	return row
 }
 
 func (m RunWatchFlowModel) currentStepRow(step RunWatchStep, wf RunWatchWorkflow, parallel bool) string {
@@ -1151,27 +1159,27 @@ func (m RunWatchFlowModel) timing(start *time.Time, end *time.Time) string {
 		m.muted("  @ "+clock)
 }
 
-// rowWaterfall draws a job or step interval against its workflow's total
-// window. The workflow row remains the source of explicit clock timestamps.
+// rowWaterfall draws a step interval against its workflow's total window. The
+// workflow row remains the source of explicit clock timestamps.
 func (m RunWatchFlowModel) rowWaterfall(start, end, origin, workflowEnd *time.Time) string {
-	return m.rowWaterfallWith(start, end, origin, workflowEnd, 6, func(from, to int) string {
+	return m.rowWaterfallWith(start, end, origin, workflowEnd, 6, "\u2800", func(from, to int) string {
 		var mask uint8
 		for subcell := from; subcell < to; subcell++ {
 			mask |= 1 << subcell
 		}
-		return runWatchSextantGlyph(mask)
+		return runWatchBrailleGlyph(mask)
 	})
 }
 
-// rowJobWaterfall draws a job against the workflow window with the three
-// single-band sextants selected to stay visually crisp at terminal scale.
+// rowJobWaterfall draws a job against the workflow window with block sextants
+// for its middle-row segments.
 func (m RunWatchFlowModel) rowJobWaterfall(start, end, origin, workflowEnd *time.Time) string {
-	return m.rowWaterfallWith(start, end, origin, workflowEnd, 2, runWatchJobSextant)
+	return m.rowWaterfallWith(start, end, origin, workflowEnd, 2, " ", runWatchJobEighth)
 }
 
-func (m RunWatchFlowModel) rowWaterfallWith(start, end, origin, workflowEnd *time.Time, subdivisions int, glyph func(int, int) string) string {
+func (m RunWatchFlowModel) rowWaterfallWith(start, end, origin, workflowEnd *time.Time, subdivisions int, blank string, glyph func(int, int) string) string {
 	if start == nil || start.IsZero() || origin == nil || origin.IsZero() {
-		return strings.Repeat(" ", 10+runWatchWaterfallCells)
+		return strings.Repeat(" ", 10) + strings.Repeat(blank, runWatchWaterfallCells)
 	}
 	spanEnd := time.Now()
 	if workflowEnd != nil {
@@ -1185,9 +1193,14 @@ func (m RunWatchFlowModel) rowWaterfallWith(start, end, origin, workflowEnd *tim
 	if end != nil {
 		rowEnd = *end
 	}
+	d := rowEnd.Sub(*start)
+	if end == nil {
+		d = time.Since(*start)
+	}
+	duration := m.palette.Mute(m.palette.Warning).Render(fmt.Sprintf("%-8s", FormatElapsed(d)))
 	units := runWatchWaterfallCells * subdivisions
-	left := int(math.Floor(float64(start.Sub(*origin)) / float64(span) * float64(units)))
-	right := int(math.Ceil(float64(rowEnd.Sub(*origin)) / float64(span) * float64(units)))
+	left := scaleDuration(start.Sub(*origin), span, units, false)
+	right := scaleDuration(rowEnd.Sub(*origin), span, units, true)
 	left = min(max(left, 0), units-1)
 	right = min(max(right, left+1), units)
 	bar := make([]string, runWatchWaterfallCells)
@@ -1195,17 +1208,30 @@ func (m RunWatchFlowModel) rowWaterfallWith(start, end, origin, workflowEnd *tim
 		from := max(left, cell*subdivisions) - cell*subdivisions
 		to := min(right, (cell+1)*subdivisions) - cell*subdivisions
 		if to <= from {
-			bar[cell] = " "
+			bar[cell] = blank
 			continue
 		}
 		bar[cell] = glyph(from, to)
 	}
-	d := rowEnd.Sub(*start)
-	if end == nil {
-		d = time.Since(*start)
+	return duration + "  " + strings.Join(bar, "")
+}
+
+// scaleDuration maps an offset in a time span to a number of discrete units.
+// The offset is clamped to the span and scaled with integer arithmetic so a
+// floating-point rounding error cannot move a bar into the preceding cell.
+func scaleDuration(offset, span time.Duration, units int, roundUp bool) int {
+	if offset <= 0 {
+		return 0
 	}
-	duration := fmt.Sprintf("%-8s", FormatElapsed(d))
-	return m.palette.Mute(m.palette.Warning).Render(duration) + "  " + strings.Join(bar, "")
+	if offset >= span {
+		return units
+	}
+	hi, lo := bits.Mul64(uint64(offset), uint64(units))
+	quotient, remainder := bits.Div64(hi, lo, uint64(span))
+	if roundUp && remainder > 0 {
+		quotient++
+	}
+	return int(quotient)
 }
 
 // clockLayout is the layout the timing column renders timestamps with: the
