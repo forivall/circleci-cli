@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -542,6 +543,8 @@ func watchState(state runGetOutput, appURL string) ui.RunWatchState {
 	}
 	if !state.all {
 		out.Workflows = latestWatchWorkflows(out.Workflows)
+	} else {
+		slices.Reverse(out.Workflows)
 	}
 	return out
 }
