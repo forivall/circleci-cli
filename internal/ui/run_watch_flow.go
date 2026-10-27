@@ -353,7 +353,7 @@ func (*runWatchOutputCommand) SetStderr(io.Writer) {}
 // and the footer's countdown says so. ctrl+c and esc also quit but go
 // unadvertised — the footer names the shortest form of each action, as the
 // pickers' footers do.
-var runWatchKeys = []key.Binding{components.BindFailed, components.BindRefresh, components.BindRerun, components.BindQuit}
+var runWatchKeys = []key.Binding{components.BindRefresh, components.BindRerun, components.BindQuit}
 
 // RunWatchFlowModel is the bubbletea program behind `circleci run watch` in an
 // interactive terminal: a live table of the run's workflows and their jobs, each
@@ -1017,9 +1017,13 @@ func (m RunWatchFlowModel) footer() string {
 	case AutoRerunOn:
 		autoRerun = " · auto-rerun on"
 	}
+	keys := runWatchKeys
+	if len(m.state.FailedSteps()) > 0 {
+		keys = append([]key.Binding{components.BindFailed}, keys...)
+	}
 	return m.line("  "+m.spinnerPrefix()+
 		m.muted("Elapsed "+FormatElapsed(m.elapsed())+" · "+m.nextPollNote()+autoRerun)) +
-		m.line("  "+components.HintsStyled(m.palette.Muted, runWatchKeys...))
+		m.line("  "+components.HintsStyled(m.palette.Muted, keys...))
 }
 
 func (m RunWatchFlowModel) failedWorkflowID() uuid.UUID {
