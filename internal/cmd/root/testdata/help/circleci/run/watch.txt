@@ -15,6 +15,7 @@ When omitted, the latest run for the current branch is watched.
 
 | Flag                  | Description                                                            |
 | --------------------- | ---------------------------------------------------------------------- |
+| `--all`               | Show all workflows, including completed reruns                         |
 | `-b, --branch string` | Branch to watch (defaults to current branch)                           |
 | `--failfast`          | Exit as soon as any job fails, without waiting for the rest of the run |
 | `--nofail`            | Keep the interactive watch open after failure to rerun failed jobs     |
@@ -41,7 +42,8 @@ Global flags: `-c, --config`, `--debug`, `--no-color`, `-q, --quiet` — see `ci
 
 Monitor a CircleCI run and block until it finishes. By default, watch the run
 for the current branch. When running in a TTY, displays a live table of
-workflows and jobs. When piped or in CI, prints a line on change.
+workflows and jobs. Completed reruns are grouped by workflow name; use --all
+to display every workflow in the run. When piped or in CI, prints a line on change.
 
 Exit codes: 0=success, 1=failed, 6=cancelled, 7=config error, 8=timed out.
 

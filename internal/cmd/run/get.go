@@ -159,6 +159,7 @@ type runGetOutput struct {
 
 	projectSlug    string
 	pipelineNumber int64
+	all            bool
 }
 
 type errorOutput struct {

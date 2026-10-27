@@ -1,6 +1,7 @@
 Usage:  circleci run watch [<run-id>] [flags]
 
 Flags:
+      --all                Show all workflows, including completed reruns
   -b, --branch string      Branch to watch (defaults to current branch)
       --failfast           Exit as soon as any job fails, without waiting for the rest of the run
   -h, --help               help for watch
