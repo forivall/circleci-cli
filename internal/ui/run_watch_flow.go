@@ -156,9 +156,10 @@ type RunWatchStep struct {
 
 // RunWatchFailedStep identifies a failed step whose output can be displayed.
 type RunWatchFailedStep struct {
-	JobID   uuid.UUID
-	JobName string
-	Step    RunWatchStep
+	JobID    uuid.UUID
+	JobName  string
+	Step     RunWatchStep
+	Parallel bool
 }
 
 // RunWatchWorkflow is one workflow row and the job rows nested under it. URL and
@@ -610,6 +611,9 @@ func (m RunWatchFlowModel) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			icons := make([]string, len(m.steps))
 			for i, step := range m.steps {
 				labels[i] = fmt.Sprintf("%s — %s (#%d)", step.JobName, step.Step.Name, step.Step.StepNum)
+				if step.Parallel {
+					labels[i] = fmt.Sprintf("%s — %s (#%d, execution %d)", step.JobName, step.Step.Name, step.Step.StepNum, step.Step.Execution)
+				}
 				icons[i] = m.palette.StatusText("✗", "✗")
 			}
 			m.menu = components.NewSelectModel("Select a failed step", labels).
@@ -655,6 +659,13 @@ func (m RunWatchFlowModel) cmdStepOutput(step RunWatchFailedStep) tea.Cmd {
 			return runWatchStepOutputMsg{err: errors.New("step output is unavailable")}
 		}
 		out, err := m.opts.FetchStepOutput(m.ctx, step.JobID, step.Step.Execution, step.Step.StepNum)
+		if err == nil {
+			command := fmt.Sprintf("# circleci job output get %s --step-num %d", step.JobID, step.Step.StepNum)
+			if step.Parallel || step.Step.Execution != 0 {
+				command += fmt.Sprintf(" --execution %d", step.Step.Execution)
+			}
+			out = command + "\n" + out
+		}
 		return runWatchStepOutputMsg{output: out, err: err}
 	}
 }
@@ -663,9 +674,17 @@ func (s RunWatchState) FailedSteps() []RunWatchFailedStep {
 	var out []RunWatchFailedStep
 	for _, wf := range s.Workflows {
 		for _, job := range wf.Jobs {
+			parallel := false
+			for _, step := range job.Steps {
+				if step.Execution != 0 {
+					parallel = true
+					break
+				}
+			}
+
 			for _, step := range job.Steps {
 				if IsFailedStepStatus(step.Status) {
-					out = append(out, RunWatchFailedStep{JobID: job.ID, JobName: job.Name, Step: step})
+					out = append(out, RunWatchFailedStep{JobID: job.ID, JobName: job.Name, Step: step, Parallel: parallel})
 				}
 			}
 		}

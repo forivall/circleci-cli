@@ -140,6 +140,11 @@ func runFailureReport(ctx context.Context, client *apiclient.Client, r *apiclien
 					} else {
 						fmt.Fprintf(&out, "#### step %d: %s\n\n", step.Num, step.Name)
 					}
+					fmt.Fprintf(&out, "Run `circleci job output get %s --step-num %d", j.ID, step.Num)
+					if fe.exec.Index != 0 {
+						fmt.Fprintf(&out, " --execution %d", fe.exec.Index)
+					}
+					out.WriteString("` for the full step output.\n\n")
 
 					condensed, err := client.GetJobStdoutCondensed(ctx, j.ID, fe.exec.Index, step.Num)
 					if err != nil {
