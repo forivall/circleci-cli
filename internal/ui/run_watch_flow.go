@@ -1229,7 +1229,7 @@ func (m RunWatchFlowModel) rowWaterfall(start, end, origin, workflowEnd *time.Ti
 // rowJobWaterfall draws a job against the workflow window with block sextants
 // for its middle-row segments.
 func (m RunWatchFlowModel) rowJobWaterfall(start, end, origin, workflowEnd *time.Time) string {
-	return m.rowWaterfallWith(start, end, origin, workflowEnd, 2, " ", runWatchJobEighth)
+	return m.rowWaterfallWith(start, end, origin, workflowEnd, 2, "\u2800", runWatchJobEighth)
 }
 
 func (m RunWatchFlowModel) rowWaterfallWith(start, end, origin, workflowEnd *time.Time, subdivisions int, blank string, glyph func(int, int) string) string {
